@@ -178,6 +178,7 @@ class GaussianDiffusion1D(nn.Module):
         continuous = False,
         connectivity = False,
         shortest_path = False,
+        innerloop_steps = None,
     ):
         super().__init__()
         self.model = model
@@ -211,6 +212,7 @@ class GaussianDiffusion1D(nn.Module):
         self.connectivity = connectivity
         self.continuous = continuous
         self.shortest_path = shortest_path
+        self.innerloop_steps = innerloop_steps
 
         # sampling related parameters
 
@@ -440,7 +442,9 @@ class GaussianDiffusion1D(nn.Module):
 
             # if t < 50:
 
-            if self.sudoku:
+            if self.innerloop_steps is not None:
+                step = self.innerloop_steps
+            elif self.sudoku:
                 step = 20
             else:
                 step = 5
@@ -1050,8 +1054,7 @@ class Trainer1D(object):
                 # pdb.set_trace()
                 # print("here")
                 if self.metric == 'sudoku':
-                    # samples_traj = samples
-                    summary = sudoku_accuracy(samples[-1], label, mask)
+                    summary = sudoku_accuracy(samples, label, mask)
                     for k, v in summary.items():
                         meters[k].update(v, n=inp.size(0))
                 elif self.metric == 'sudoku_latent':
@@ -1412,4 +1415,3 @@ def shortest_path_1d_accuracy_closed_loop(pred: torch.Tensor, label: torch.Tenso
     return {
         'closed_loop_success_rate' + name: as_float(succ.float().mean()),
     }
-

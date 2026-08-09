@@ -1,3 +1,4 @@
+import os
 import os.path as osp
 import torch
 import pandas as pd
@@ -6,7 +7,7 @@ from torch.utils.data.dataset import Dataset
 
 
 def get_data_dir(identifier):
-    base_dir = osp.join(osp.dirname(__file__), 'data')
+    base_dir = os.environ.get('IRED_DATA_ROOT', osp.join(osp.dirname(__file__), 'data'))
     if identifier.startswith('parity'):
         if identifier == 'parity':
             return osp.join(base_dir, 'parity', '40')
