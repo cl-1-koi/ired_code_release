@@ -89,8 +89,9 @@ class StatefulPermutationBatcher:
     def load_state_dict(self, state: dict) -> None:
         if state["n"] != self.n or state["batch_size"] != self.batch_size:
             raise RuntimeError("batcher configuration mismatch")
-        self.generator.set_state(state["generator_state"])
-        self.permutation = state["permutation"]
+        self.generator.set_state(state["generator_state"].cpu())
+        self.permutation = (None if state["permutation"] is None
+                            else state["permutation"].cpu())
         self.offset = int(state["offset"])
 
 
@@ -249,13 +250,16 @@ def main() -> None:
     if args.resume:
         manifest = json.loads(manifest_path.read_text())
         verify_manifest(manifest, args)
-        payload = torch.load(args.resume, map_location=device, weights_only=False)
+        # Keep process-global and batching RNG tensors on CPU. Optimizer/model
+        # loaders copy their own tensors onto the CUDA parameters as needed.
+        payload = torch.load(args.resume, map_location="cpu", weights_only=False)
         if payload["manifest_sha256"] != manifest["seal"]["sha256"]:
             raise RuntimeError("checkpoint manifest mismatch")
         model.load_state_dict(payload["model"]); optimizer.load_state_dict(payload["optimizer"])
         ema.load_state_dict(payload["ema"]); batcher.load_state_dict(payload["batcher"])
         random.setstate(payload["rng"]["python"]); np.random.set_state(payload["rng"]["numpy"])
-        torch.set_rng_state(payload["rng"]["torch"]); torch.cuda.set_rng_state_all(payload["rng"]["cuda"])
+        torch.set_rng_state(payload["rng"]["torch"].cpu())
+        torch.cuda.set_rng_state_all([state.cpu() for state in payload["rng"]["cuda"]])
         step = int(payload["step"])
     else:
         if manifest_path.exists():
