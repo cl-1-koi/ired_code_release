@@ -66,6 +66,29 @@ outputs and checkpoints stay outside Git.
    declared next arm is an exact resume to the public code's 1.3M-step target; it
    is not a silent reinterpretation of the 50k reproduction.
 
+### Declared 1.3M extension after the 50k verdict
+
+The 50k run under-reproduced the paper: strict valid solve rate was 76.9% on
+the standard 1,000 boards and 4.4667% on the RRN-hard 18,000 boards, versus
+99.4% and 62.1% reported in the paper.  Its standard-set inference sweep also
+plateaued: inner steps 1/5/10/15/20/40/80 yielded
+71.5/69.6/74.0/76.2/76.9/78.0/77.8 percent strict solves.
+
+Proceed with the already-declared exact continuation to the released code's
+1.3M default.  Preserve model, Adam, EMA, shuffled-batch permutation, and all
+Python/NumPy/Torch/CUDA RNG states from the signed step-50,000 checkpoint.
+Create a new signed lineage manifest referencing the parent manifest and
+checkpoint hashes; never rewrite the signed 50k manifest.
+
+Save recovery checkpoints every 50,000 steps.  Retain landmark checkpoints at
+100k, 300k, 1M, and 1.3M for full standard and hard evaluations with inference
+steps `{1,5,10,20,40,80}`.  These evaluations use the same fixed dataset and
+sampler seeds as the 50k verdict.  Report strict valid/clue-consistent solves,
+exact reference matches, unknown-cell accuracy, the released weak score,
+energy-model calls, and wall time.  The extension tests whether the paper/code
+50k-versus-1.3M discrepancy explains the failed reproduction; it does not
+replace the failed 50k result.
+
 ## RunPod policy for this ladder
 
 Once R0 is healthy, the queued next experiment is `R1 resume-to-50k`; the pod

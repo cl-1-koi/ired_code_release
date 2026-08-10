@@ -132,6 +132,7 @@ def source_hashes(repo: Path) -> dict:
         "repro/evaluate_sudoku.py",
         "repro/sudoku_metrics.py",
         "ops/run_ired_sudoku_ladder.sh",
+        "ops/run_ired_sudoku_extension.sh",
         "requirements-repro.txt",
         "IRED_SUDOKU_REPRO_SPEC_20260809.md",
     ]
@@ -184,10 +185,8 @@ def make_manifest(args, dataset, model, repo: Path, data_root: Path) -> dict:
     return {**content, "seal": {"sha256": sha256_json(content)}}
 
 
-def verify_manifest(manifest: dict, args) -> None:
-    seal = manifest["seal"]["sha256"]
-    if sha256_json({key: value for key, value in manifest.items() if key != "seal"}) != seal:
-        raise RuntimeError("manifest seal mismatch")
+def verify_manifest(manifest: dict, args) -> str:
+    seal = verify_manifest_seal(manifest)
     if manifest["code"]["commit"] != git("rev-parse", "HEAD"):
         raise RuntimeError("source commit changed")
     if manifest["code"]["dirty"] or git("status", "--porcelain"):
@@ -197,6 +196,57 @@ def verify_manifest(manifest: dict, args) -> None:
         args.seed, args.batch_size, args.target_steps
     ):
         raise RuntimeError("training contract changed")
+    return seal
+
+
+def verify_manifest_seal(manifest: dict) -> str:
+    seal = manifest["seal"]["sha256"]
+    if sha256_json({key: value for key, value in manifest.items() if key != "seal"}) != seal:
+        raise RuntimeError("manifest seal mismatch")
+    return seal
+
+
+def make_extension_manifest(
+    args, dataset, model, repo: Path, data_root: Path,
+    parent_manifest: dict, parent_manifest_path: Path,
+    parent_checkpoint_path: Path, parent_checkpoint: dict,
+) -> dict:
+    parent_seal = verify_manifest_seal(parent_manifest)
+    parent_training = parent_manifest["training"]
+    if (parent_training["seed"], parent_training["batch_size"]) != (
+        args.seed, args.batch_size
+    ):
+        raise RuntimeError("parent seed or batch size changed")
+    parent_step = int(parent_checkpoint["step"])
+    if parent_checkpoint["manifest_sha256"] != parent_seal:
+        raise RuntimeError("parent checkpoint does not belong to parent manifest")
+    if args.target_steps <= parent_step:
+        raise RuntimeError("extension target must exceed the parent step")
+
+    manifest = make_manifest(args, dataset, model, repo, data_root)
+    if manifest["code"]["dirty"]:
+        raise RuntimeError("source worktree is dirty")
+    content = {key: value for key, value in manifest.items() if key != "seal"}
+    content["lineage"] = {
+        "kind": "exact_resume_target_extension",
+        "reason": (
+            "paper-declared 50k endpoint under-reproduced; continue the exact "
+            "trajectory to the released code's 1.3M default"
+        ),
+        "parent_source_commit": parent_manifest["code"]["commit"],
+        "parent_manifest": str(parent_manifest_path.resolve()),
+        "parent_manifest_sha256": sha256_file(parent_manifest_path),
+        "parent_manifest_seal": parent_seal,
+        "parent_checkpoint": str(parent_checkpoint_path.resolve()),
+        "parent_checkpoint_sha256": sha256_file(parent_checkpoint_path),
+        "parent_step": parent_step,
+        "parent_target_steps": parent_training["target_steps"],
+    }
+    content["execution"]["planned_handoff"] = (
+        "evaluate standard and hard sets over inference steps "
+        "{1,5,10,20,40,80} at 100k, 300k, 1M, and 1.3M"
+    )
+    return {**content, "seal": {"sha256": sha256_json(content)}}
 
 
 def save_checkpoint(path: Path, *, step: int, model, optimizer, ema, batcher,
@@ -224,6 +274,10 @@ def main() -> None:
     parser.add_argument("--log-every", type=int, default=20)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--resume", default=None)
+    parser.add_argument(
+        "--parent-manifest", default=None,
+        help="signed parent manifest used only to start a new target-extension lineage",
+    )
     parser.add_argument("--time-budget-seconds", type=float, default=None)
     args = parser.parse_args()
     if not 0 < args.stop_after_step <= args.target_steps:
@@ -248,12 +302,27 @@ def main() -> None:
 
     manifest_path = output / "training_manifest.json"
     if args.resume:
-        manifest = json.loads(manifest_path.read_text())
-        verify_manifest(manifest, args)
         # Keep process-global and batching RNG tensors on CPU. Optimizer/model
         # loaders copy their own tensors onto the CUDA parameters as needed.
         payload = torch.load(args.resume, map_location="cpu", weights_only=False)
-        if payload["manifest_sha256"] != manifest["seal"]["sha256"]:
+        if manifest_path.exists():
+            manifest = json.loads(manifest_path.read_text())
+            expected_manifest_seal = verify_manifest(manifest, args)
+        elif args.parent_manifest:
+            parent_manifest_path = Path(args.parent_manifest).resolve()
+            parent_manifest = json.loads(parent_manifest_path.read_text())
+            manifest = make_extension_manifest(
+                args, dataset, model, repo, data_root,
+                parent_manifest, parent_manifest_path,
+                Path(args.resume).resolve(), payload,
+            )
+            atomic_json(manifest_path, manifest)
+            expected_manifest_seal = parent_manifest["seal"]["sha256"]
+        else:
+            raise RuntimeError(
+                "resume into a new output directory requires --parent-manifest"
+            )
+        if payload["manifest_sha256"] != expected_manifest_seal:
             raise RuntimeError("checkpoint manifest mismatch")
         model.load_state_dict(payload["model"]); optimizer.load_state_dict(payload["optimizer"])
         ema.load_state_dict(payload["ema"]); batcher.load_state_dict(payload["batcher"])
@@ -326,6 +395,8 @@ def main() -> None:
         "reached_target": step >= args.target_steps, "wall_seconds": time.time() - started,
         "latest_checkpoint": str(latest),
         "latest_checkpoint_sha256": sha256_file(latest),
+        "training_manifest_sha256": sha256_file(manifest_path),
+        "training_manifest_seal": manifest["seal"]["sha256"],
     }
     atomic_json(output / f"training_summary_step_{step:09d}.json", summary)
     print(json.dumps(summary, sort_keys=True))
