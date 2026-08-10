@@ -313,21 +313,32 @@ def supervise_fidelity_arm(config: dict[str, Any], arm: dict[str, Any]) -> dict[
     closure_name = "artifact_closure.json" if state == "complete" else "failure_closure.json"
     if (local / closure_name).is_file():
         report["artifact_closure"] = json.loads((local / closure_name).read_text())
-        return report
-    result = rsync_from(arm, remote + "/", local)
-    if result.returncode:
-        report["artifact_closure"] = {
-            "state": "sync_failed", "error": result.stderr[-500:]
-        }
-        return report
-    try:
-        report["artifact_closure"] = verify_result(
-            local, "completion.json" if state == "complete" else "failure.json"
-        )
-    except Exception as exc:
-        report["artifact_closure"] = {
-            "state": "verification_failed", "error": str(exc)
-        }
+    else:
+        result = rsync_from(arm, remote + "/", local)
+        if result.returncode:
+            report["artifact_closure"] = {
+                "state": "sync_failed", "error": result.stderr[-500:]
+            }
+            return report
+        try:
+            report["artifact_closure"] = verify_result(
+                local, "completion.json" if state == "complete" else "failure.json"
+            )
+        except Exception as exc:
+            report["artifact_closure"] = {
+                "state": "verification_failed", "error": str(exc)
+            }
+    if (
+        state == "complete"
+        and report.get("artifact_closure", {}).get("verified")
+        and arm.get("terminate_after_verified", False)
+    ):
+        try:
+            runpod.terminate_pod(arm["pod_id"])
+            report["termination_requested"] = True
+        except Exception as exc:
+            report["termination_requested"] = False
+            report["termination_error"] = str(exc)
     return report
 
 
@@ -352,7 +363,7 @@ def cycle(config: dict[str, Any]) -> dict[str, Any]:
         for evaluator in config["evaluators"]
     }
     fidelity_arms = {
-        arm["pod_id"]: supervise_fidelity_arm(config, arm)
+        arm["name"]: supervise_fidelity_arm(config, arm)
         for arm in config.get("fidelity_arms", [])
     }
     return {
