@@ -83,7 +83,11 @@ def main() -> None:
         raise SystemExit("requested evaluation slice is empty or out of range")
 
     device = torch.device("cuda", 0)
-    diffusion = build_model(dataset.inp_dim, dataset.out_dim, args.innerloop_steps).to(device)
+    final_conv_kernel = int(manifest.get("model", {}).get("final_conv_kernel", 1))
+    diffusion = build_model(
+        dataset.inp_dim, dataset.out_dim, args.innerloop_steps,
+        final_conv_kernel=final_conv_kernel,
+    ).to(device)
     diffusion.out_dim = dataset.out_dim
     diffusion.out_shape = (dataset.out_dim,)
     ema = EMA(diffusion, beta=0.995, update_every=10).to(device)
@@ -149,6 +153,9 @@ def main() -> None:
         "checkpoint": {"path": str(checkpoint_path), "sha256": sha256_file(checkpoint_path),
                        "step": int(payload["step"]),
                        "manifest_sha256": payload["manifest_sha256"]},
+        "model": {"final_conv_kernel": final_conv_kernel,
+                  "architecture_reference": manifest.get("model", {}).get(
+                      "architecture_reference", "released_code")},
         "sampling": {"seed": args.seed, "batch_size": args.batch_size,
                      "diffusion_landscapes": 10, "innerloop_steps": args.innerloop_steps,
                      "observed_ebm_forward_calls": forward_calls,

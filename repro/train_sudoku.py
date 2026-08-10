@@ -95,8 +95,18 @@ class StatefulPermutationBatcher:
         self.offset = int(state["offset"])
 
 
-def build_model(inp_dim: int, out_dim: int, innerloop_steps: int = 20):
+def build_model(
+    inp_dim: int, out_dim: int, innerloop_steps: int = 20,
+    final_conv_kernel: int = 1,
+):
+    if final_conv_kernel not in (1, 3):
+        raise ValueError("final_conv_kernel must be 1 or 3")
     energy = SudokuEBM(inp_dim=inp_dim, out_dim=out_dim)
+    if final_conv_kernel == 3:
+        # The released SudokuEBM uses a 1x1 output convolution, while Table 10
+        # of the paper specifies 3x3.  Keep released-code behavior as the
+        # default and expose the paper-declared architecture as a sealed arm.
+        energy.conv5 = torch.nn.Conv2d(384, 9, 3, padding=1)
     diffusion = GaussianDiffusion1D(
         DiffusionWrapper(energy),
         seq_length=32,
@@ -135,6 +145,7 @@ def source_hashes(repo: Path) -> dict:
         "ops/run_ired_sudoku_extension.sh",
         "ops/run_ired_sudoku_eval.sh",
         "ops/run_ired_sudoku_eval_queue.sh",
+        "ops/run_ired_sudoku_fidelity_arm.sh",
         "requirements-repro.txt",
         "IRED_SUDOKU_REPRO_SPEC_20260809.md",
     ]
@@ -162,6 +173,11 @@ def make_manifest(args, dataset, model, repo: Path, data_root: Path) -> dict:
         "model": {
             "name": "released SudokuEBM CNN",
             "parameters": sum(parameter.numel() for parameter in model.parameters()),
+            "final_conv_kernel": args.final_conv_kernel,
+            "architecture_reference": (
+                "released_code" if args.final_conv_kernel == 1
+                else "paper_table_10"
+            ),
             "diffusion_landscapes": 10,
             "inner_gradient_steps_per_landscape": 20,
             "contrastive_cell_corruption_probability": 0.05,
@@ -275,6 +291,7 @@ def main() -> None:
     parser.add_argument("--checkpoint-every", type=int, default=5000)
     parser.add_argument("--log-every", type=int, default=20)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--final-conv-kernel", type=int, choices=(1, 3), default=1)
     parser.add_argument("--resume", default=None)
     parser.add_argument(
         "--parent-manifest", default=None,
@@ -297,7 +314,10 @@ def main() -> None:
     data_root = Path(os.environ.get("IRED_DATA_ROOT", repo / "data")).resolve()
     dataset = SudokuDataset("sudoku", split="train")
     device = torch.device("cuda", 0)
-    model = build_model(dataset.inp_dim, dataset.out_dim).to(device)
+    model = build_model(
+        dataset.inp_dim, dataset.out_dim,
+        final_conv_kernel=args.final_conv_kernel,
+    ).to(device)
     optimizer = Adam(model.parameters(), lr=1e-4, betas=(0.9, 0.99))
     ema = EMA(model, beta=0.995, update_every=10).to(device)
     batcher = StatefulPermutationBatcher(len(dataset), args.batch_size, args.seed + 1)

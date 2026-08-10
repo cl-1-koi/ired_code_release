@@ -97,6 +97,18 @@ hard set for its assigned steps, avoiding aggregation ambiguity.  Per-GPU
 queues wait for hash-verified landmark inputs and for any 50k sweep already on
 that GPU to finish before starting.
 
+### Fidelity sensitivities after the released-code arm
+
+The released `SudokuEBM` ends with a 1x1 convolution, but paper Table 10 says
+the final 9-channel convolution is 3x3.  This is a material paper/code
+discrepancy, not a reason to reinterpret the active arm.  Run two separate
+50k controls: a fresh released-code seed replicate (1x1), and a seed-42
+paper-architecture sensitivity (3x3).  Both retain the same data, loss,
+optimizer, EMA, sampling, and evaluation contracts.  Compare all reported
+metrics, with strict whole-board validity remaining primary; the paper does
+not define which of the released evaluator's `accuracy`, `consistency`, or
+`board_accuracy` fields generated Table 4.
+
 ## RunPod policy for this ladder
 
 Once R0 is healthy, the queued next experiment is `R1 resume-to-50k`; the pod
