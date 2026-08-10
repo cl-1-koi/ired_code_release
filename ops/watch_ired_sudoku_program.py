@@ -286,6 +286,51 @@ def collect_results(config: dict[str, Any], evaluator: dict[str, Any]) -> dict[s
     return report
 
 
+def supervise_fidelity_arm(config: dict[str, Any], arm: dict[str, Any]) -> dict[str, Any]:
+    remote = arm["remote_output"].rstrip("/")
+    shell = (
+        f"if test -s {shlex.quote(remote + '/completion.json')}; then echo state=complete; "
+        f"elif test -s {shlex.quote(remote + '/failure.json')}; then echo state=failed; "
+        f"elif tmux has-session -t {shlex.quote(arm['session'])} 2>/dev/null; "
+        "then echo state=running; else echo state=idle_or_missing; fi; "
+        f"tail -n 1 {shlex.quote(remote + '/train/telemetry.jsonl')} 2>/dev/null || true; "
+        "nvidia-smi --query-gpu=index,utilization.gpu,memory.used "
+        "--format=csv,noheader 2>/dev/null || true"
+    )
+    probe = ssh(arm, shell)
+    report: dict[str, Any] = {
+        "returncode": probe.returncode,
+        "lines": probe.stdout.splitlines(),
+        "error": probe.stderr[-500:] if probe.returncode else "",
+    }
+    state = "unreachable"
+    if probe.returncode == 0 and report["lines"]:
+        state = report["lines"][0].removeprefix("state=")
+    report["state"] = state
+    if state not in ("complete", "failed"):
+        return report
+    local = Path(config["local_fidelity_root"]) / arm["pod_id"] / arm["name"]
+    closure_name = "artifact_closure.json" if state == "complete" else "failure_closure.json"
+    if (local / closure_name).is_file():
+        report["artifact_closure"] = json.loads((local / closure_name).read_text())
+        return report
+    result = rsync_from(arm, remote + "/", local)
+    if result.returncode:
+        report["artifact_closure"] = {
+            "state": "sync_failed", "error": result.stderr[-500:]
+        }
+        return report
+    try:
+        report["artifact_closure"] = verify_result(
+            local, "completion.json" if state == "complete" else "failure.json"
+        )
+    except Exception as exc:
+        report["artifact_closure"] = {
+            "state": "verification_failed", "error": str(exc)
+        }
+    return report
+
+
 def cycle(config: dict[str, Any]) -> dict[str, Any]:
     account = {pod["id"]: pod for pod in runpod.get_pods()}
     local_checkpoint_root = Path(config["local_checkpoint_root"])
@@ -306,6 +351,10 @@ def cycle(config: dict[str, Any]) -> dict[str, Any]:
         evaluator["pod_id"]: collect_results(config, evaluator)
         for evaluator in config["evaluators"]
     }
+    fidelity_arms = {
+        arm["pod_id"]: supervise_fidelity_arm(config, arm)
+        for arm in config.get("fidelity_arms", [])
+    }
     return {
         "schema": "ired/sudoku-program-supervisor-v1",
         "updated_utc": utc_now(),
@@ -316,6 +365,7 @@ def cycle(config: dict[str, Any]) -> dict[str, Any]:
         "trainer": trainer_probe(config),
         "landmarks": landmarks,
         "evaluations": evaluations,
+        "fidelity_arms": fidelity_arms,
     }
 
 
