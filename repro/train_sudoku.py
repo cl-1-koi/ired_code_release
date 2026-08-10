@@ -134,6 +134,7 @@ def source_hashes(repo: Path) -> dict:
         "ops/run_ired_sudoku_ladder.sh",
         "ops/run_ired_sudoku_extension.sh",
         "ops/run_ired_sudoku_eval.sh",
+        "ops/run_ired_sudoku_eval_queue.sh",
         "requirements-repro.txt",
         "IRED_SUDOKU_REPRO_SPEC_20260809.md",
     ]

@@ -91,6 +91,12 @@ energy-model calls, and wall time.  The extension tests whether the paper/code
 50k-versus-1.3M discrepancy explains the failed reproduction; it does not
 replace the failed 50k result.
 
+The retained evaluation GPUs are partitioned by inner-step value, not by
+dataset rows.  Each GPU runs the complete standard set and then the complete
+hard set for its assigned steps, avoiding aggregation ambiguity.  Per-GPU
+queues wait for hash-verified landmark inputs and for any 50k sweep already on
+that GPU to finish before starting.
+
 ## RunPod policy for this ladder
 
 Once R0 is healthy, the queued next experiment is `R1 resume-to-50k`; the pod
