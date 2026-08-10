@@ -133,6 +133,7 @@ def source_hashes(repo: Path) -> dict:
         "repro/sudoku_metrics.py",
         "ops/run_ired_sudoku_ladder.sh",
         "ops/run_ired_sudoku_extension.sh",
+        "ops/run_ired_sudoku_eval.sh",
         "requirements-repro.txt",
         "IRED_SUDOKU_REPRO_SPEC_20260809.md",
     ]
@@ -244,7 +245,7 @@ def make_extension_manifest(
     }
     content["execution"]["planned_handoff"] = (
         "evaluate standard and hard sets over inference steps "
-        "{1,5,10,20,40,80} at 100k, 300k, 1M, and 1.3M"
+        "{1,5,10,15,20,40,80} at 100k, 300k, 1M, and 1.3M"
     )
     return {**content, "seal": {"sha256": sha256_json(content)}}
 

@@ -42,7 +42,7 @@ payload = {
     "latest_step": int(latest),
     "target_step": int(target),
     "queued_next_experiment": (
-        "standard/hard inference-step sweep {1,5,10,20,40,80} at the next "
+        "standard/hard inference-step sweep {1,5,10,15,20,40,80} at the next "
         "landmark checkpoint"
     ),
     "retain_or_terminate_rationale": (
