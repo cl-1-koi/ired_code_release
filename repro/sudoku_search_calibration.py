@@ -39,6 +39,36 @@ def git(*args: str) -> str:
     return subprocess.check_output(["git", *args], text=True).strip()
 
 
+def capture_code_provenance() -> dict:
+    """Freeze provenance before a long evaluation can outlive source edits."""
+    repo = Path(__file__).resolve().parents[1]
+    dependency_paths = [
+        Path(__file__).resolve(),
+        repo / "repro/sudoku_energy_calibration.py",
+        repo / "repro/sudoku_metrics.py",
+        repo / "repro/train_sudoku.py",
+        repo / "diffusion_lib/denoising_diffusion_pytorch_1d.py",
+        repo / "models.py",
+    ]
+    status = git("status", "--porcelain")
+    return {
+        "captured_utc": utc_now(),
+        "commit": git("rev-parse", "HEAD"),
+        "dirty": bool(status),
+        "dirty_paths": status.splitlines(),
+        "source_sha256": sha256_file(Path(__file__).resolve()),
+        "dependency_sha256": {
+            str(path.relative_to(repo)): sha256_file(path)
+            for path in dependency_paths
+        },
+        "cuda_determinism": {
+            "deterministic_algorithms": torch.are_deterministic_algorithms_enabled(),
+            "cudnn_benchmark": torch.backends.cudnn.benchmark,
+            "cudnn_deterministic": torch.backends.cudnn.deterministic,
+        },
+    }
+
+
 def _mean_metric(metric: torch.Tensor) -> torch.Tensor:
     return metric.detach().float().reshape(-1)
 
@@ -322,6 +352,7 @@ def main() -> None:
     if min(args.limit, args.batch_size, args.restarts, args.innerloop_steps) < 1:
         raise SystemExit("limit, batch size, restarts, and inner steps must be positive")
 
+    code_provenance = capture_code_provenance()
     checkpoint_path = Path(args.checkpoint).resolve()
     manifest_path = Path(args.manifest).resolve()
     output_dir = Path(args.output_dir).resolve()
@@ -352,9 +383,7 @@ def main() -> None:
     summary = {
         "schema": "ired/sudoku-search-calibration-v1",
         "created_utc": utc_now(),
-        "code": {"commit": git("rev-parse", "HEAD"),
-                 "dirty": bool(git("status", "--porcelain")),
-                 "source_sha256": sha256_file(Path(__file__).resolve())},
+        "code": code_provenance,
         "checkpoint": {"path": str(checkpoint_path), "sha256": sha256_file(checkpoint_path),
                        "step": int(payload["step"]), "manifest_seal": seal},
         "manifest": {"path": str(manifest_path), "sha256": sha256_file(manifest_path)},

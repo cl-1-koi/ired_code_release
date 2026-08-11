@@ -30,6 +30,22 @@ Minimum learned-energy selection equals oracle-any selection in both panels:
 every extra solved candidate was selected.  This makes learned energy useful as
 a within-puzzle meta-policy even though one deterministic descent path is weak.
 
+The nested 16-trajectory scale-up confirms that this was not an R=4 ceiling.
+On one fixed 256-board run, the complete compute curves are:
+
+| Restarts | Standard oracle / min-energy | Hard oracle / min-energy |
+| ---: | ---: | ---: |
+| 1 | 81.25% / 81.25% (208/208) | 5.47% / 5.47% (14/14) |
+| 2 | 85.16% / 85.16% (218/218) | 7.42% / 7.42% (19/19) |
+| 4 | 87.89% / 87.89% (225/225) | 9.77% / 9.77% (25/25) |
+| 8 | 89.84% / 89.84% (230/230) | 12.89% / 12.89% (33/33) |
+| 16 | 92.19% / 92.19% (236/236) | 15.23% / 14.84% (39/38) |
+
+The first selector miss occurs only at R=16 on hard: minimum learned energy
+misses one candidate set that contains a strict solution.  Coverage is still
+the dominant bottleneck, while selector calibration becomes a measurable
+secondary target at larger populations.
+
 ## Metric correction
 
 The released `sudoku_accuracy` function returns three distinct quantities:
@@ -111,6 +127,19 @@ The declared reverse-noise diagnostic changes inference, not weights.  On the
 - two trajectories already improve strict solves to 85.16% standard and 7.42%
   hard; four improve them to 87.89% and 10.16%.
 
+At 16 trajectories, standard boards average 1.55 unique decoded candidates and
+hard boards average 10.84.  Hard within-board learned-energy/exact-conflict
+Spearman reaches 0.71.  The hard oracle curve continues from 5.47% at R=1 to
+15.23% at R=16, rather than saturating at R=4.
+
+The independent R=4 and nested R=16 invocations differ by one solved board at
+some prefixes (for example, hard R=4 is 26/256 in the original invocation and
+25/256 inside the R=16 invocation).  Seeds and relevant source hashes match,
+but CUDA deterministic algorithms were not enabled and the sampler differentiates
+through convolutions.  Report each invocation as measured rather than claiming
+bitwise prefix reproducibility; the maximum discrepancy is 0.39 percentage
+points and does not change the compute-curve conclusion.
+
 This is evidence for stochastic population inference plus energy selection,
 not evidence that the paper's deterministic Algorithm 2 was reproduced with
 noise.  The arm is always labeled
@@ -132,11 +161,10 @@ iterative failure to representation.
 ## Decision and next experiments
 
 1. Keep 50k as the current best checkpoint; do not resume it blindly.
-2. Complete the already-running fixed-panel stochastic compute curve at
-   restart prefixes 8 and 16.  This tests whether population coverage compounds
-   or saturates.
-3. If the curve continues upward, scale the stochastic panel and treat energy
-   selection over a candidate population as the immediate inference recipe.
+2. Treat stochastic population sampling plus learned-energy selection as the
+   immediate inference recipe.  The R=16 curve continues upward on both sets;
+   a larger population panel should quantify eventual saturation and selector
+   misses, but it is no longer a gate for the training intervention.
 4. The smallest training intervention is search-state negative exposure from
    the 50k checkpoint: contrast valid/noisy states against actual failed chain
    states at the same landscape, with a held-out early-stop gate.  The released
@@ -163,9 +191,17 @@ iterative failure to representation.
   `/home/ubuntu/ired-sudoku-data/calibration-63b23d8/search`.
 - Stochastic 256-board root:
   `/home/ubuntu/ired-sudoku-data/calibration-5dd1145/search-noise-n256`.
+- Nested R=16 stochastic root:
+  `/home/ubuntu/ired-sudoku-data/calibration-5dd1145/search-noise-r16-n256`.
 - Exact controls: `/home/ubuntu/ired-sudoku-data/calibration-exact-ab73928-deep`
   and `/home/ubuntu/ired-sudoku-data/calibration-exact-schedule-ab73928`.
 
 Every learned-model summary records source revision, checkpoint SHA-256,
 manifest seal, dataset slice, seed, and inference configuration.  Remote hard
-results were synced to these durable local roots before analysis.
+results were synced to these durable local roots before analysis.  The R=16
+standard process began at local commit `bea147c` with search-script SHA-256
+`b993797d...` and diffusion-core SHA-256 `689c2f7b...`; its end-of-run summary
+incorrectly reports the later `042a416` HEAD because that version captured Git
+state at process exit.  The hard process stayed at `5dd1145`, with identical
+relevant search/core hashes.  Future search summaries capture commit, dirty
+state, dependency hashes, and CUDA determinism flags before evaluation begins.
