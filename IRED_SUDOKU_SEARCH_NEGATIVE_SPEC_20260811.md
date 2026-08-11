@@ -82,8 +82,13 @@ At 51k, full standard-validation strict solving was 90.7% for `SN-T2` versus
 75.7% for `SN-C0`, and unknown-cell accuracy was 99.2375% versus 97.6305%.
 The fixed RRN-hard gate reversed: `SN-T2` solved 8/256 (3.125%) versus 16/256
 (6.25%) for `SN-C0`, with essentially equal unknown-cell accuracy (63.2969%
-versus 63.3999%).  The treatment's standard gain therefore does not establish
-generalized reasoning.
+versus 63.3999%).  A larger same-seed 2,048-board hard comparison clarifies
+that this is an early peak followed by overfitting: the base 50k checkpoint
+solves 96/2,048 (4.69%), `SN-T2` at 50,400 solves 145/2,048 (7.08%), and
+`SN-T2` at 51k falls to 108/2,048 (5.27%).  Unknown-cell accuracy follows the
+same 64.07% -> 65.15% -> 63.83% pattern.  Search-negative exposure therefore
+does create a transient generalized gain, but the unchanged finite-data recipe
+does not stabilize it.
 
 Training was finite but aggressive: over the full 1,000-step treatment,
 mean pre-clip gradient norm was 23.50 with a maximum of 357.61, versus
@@ -92,6 +97,8 @@ cosine at intermediate landscapes, but discrete Hamming repair declined.  This
 combination explains why pairwise energy ordering alone was not accepted as a
 success criterion.
 
-The predeclared train-like-only decision rule fired.  Both arms are frozen at
-51k and must not continue to 55k/60k.  The next separate arm changes data
-coverage while preserving this control/treatment distinction.
+The longer-run generalization stop rule fired.  Both arms are frozen at 51k,
+the 50,400 treatment checkpoint is preserved as the selected early endpoint,
+and neither arm may continue to 55k/60k.  The next separate arm changes data
+coverage while preserving this control/treatment distinction and asks whether
+the early benefit can be stabilized.

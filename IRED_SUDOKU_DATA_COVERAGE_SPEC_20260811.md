@@ -4,15 +4,17 @@ Date: 2026-08-11
 
 ## Question
 
-Did search-state negative refinement fail RRN-hard because the objective is
-wrong, or because all 50k pretraining and the intervention saw only the narrow
-SATNet clue distribution?
+Can broader clue-distribution coverage stabilize the transient RRN-hard gain
+from search-state negative refinement without sacrificing its large SATNet
+validation gain?
 
 The finite SATNet training set has 9,000 boards with 31--42 clues (mean 36.22).
 RRN train/validation/test span 17--34 clues (mean 25.5).  In the 51k hard gate,
-neither arm solved any of the 114 boards with 17--24 clues.  The treatment's
-standard-validation gain and RRN-hard reversal therefore justify a separate
-data-coverage experiment rather than more epochs over the same 9,000 boards.
+neither arm solved any of the 114 boards with 17--24 clues.  On a larger fixed
+2,048-board hard panel, treatment improved from 96/2,048 at the base 50k state
+to 145/2,048 at 50,400, then regressed to 108/2,048 at 51k.  The transient
+generalized gain and subsequent reversal justify a separate data-coverage
+experiment rather than more epochs over the same 9,000 easy boards.
 
 ## Frozen inputs and paired arms
 
