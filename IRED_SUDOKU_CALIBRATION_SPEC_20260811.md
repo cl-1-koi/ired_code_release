@@ -81,6 +81,11 @@ This distinguishes generation coverage from learned-energy selection quality.
 Existing sealed inner-step sweeps at 50k, 100k, and 300k remain the primary
 large-sample compute-scaling panel; the trajectory panel explains their shape.
 
+If independent initial states collapse to the same decoded board, a declared
+diagnostic may enable the implementation's reverse-process posterior noise.
+That arm is reported separately as `released_code_with_reverse_noise_diagnostic`;
+it is not pooled with or described as the released deterministic sampler.
+
 ## Decision rules
 
 1. If C0 fails, repair the search/metric harness before changing training.

@@ -43,9 +43,12 @@ def _mean_metric(metric: torch.Tensor) -> torch.Tensor:
     return metric.detach().float().reshape(-1)
 
 
-def trace_restart(model, inp, label, mask, *, inner_steps: int, seed: int):
+def trace_restart(
+    model, inp, label, mask, *, inner_steps: int, seed: int, reverse_noise: bool
+):
     """Run one exact released sampler trajectory and return per-board telemetry."""
     device = inp.device
+    torch.cuda.manual_seed(seed)
     generator = torch.Generator(device=device).manual_seed(seed)
     img = torch.randn((len(inp), *model.out_shape), generator=generator, device=device)
     landscapes = []
@@ -54,7 +57,9 @@ def trace_restart(model, inp, label, mask, *, inner_steps: int, seed: int):
         t = torch.full((len(inp),), timestep, device=device, dtype=torch.long)
         clue_value = model.q_sample(inp, t, noise=torch.zeros_like(inp))
         img = img * (1 - mask) + clue_value * mask
-        img, _ = model.p_sample(inp, img, timestep, None, scale=False, with_noise=model.baseline)
+        img, _ = model.p_sample(
+            inp, img, timestep, None, scale=False, with_noise=reverse_noise
+        )
         img = img * (1 - mask) + clue_value * mask
 
         accepted_steps = torch.zeros(len(inp), device=device)
@@ -147,6 +152,7 @@ def evaluate_search(
     restarts: int,
     inner_steps: int,
     seed: int,
+    reverse_noise: bool,
 ) -> tuple[list[dict], list[dict]]:
     device = next(model.parameters()).device
     trajectory = defaultdict(Accumulator)
@@ -170,6 +176,7 @@ def evaluate_search(
                 mask,
                 inner_steps=inner_steps,
                 seed=seed + offset * 1_000_003 + restart * 10_007,
+                reverse_noise=reverse_noise,
             )
             predictions.append(prediction)
             energies.append(final_energy)
@@ -304,6 +311,10 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--restarts", type=int, default=4)
     parser.add_argument("--innerloop-steps", type=int, default=20)
+    parser.add_argument(
+        "--reverse-noise", action="store_true",
+        help="diagnostic arm: add posterior noise during reverse diffusion",
+    )
     parser.add_argument("--seed", type=int, default=20260811)
     args = parser.parse_args()
     if not torch.cuda.is_available():
@@ -336,6 +347,7 @@ def main() -> None:
         restarts=args.restarts,
         inner_steps=args.innerloop_steps,
         seed=args.seed,
+        reverse_noise=args.reverse_noise,
     )
     summary = {
         "schema": "ired/sudoku-search-calibration-v1",
@@ -351,7 +363,12 @@ def main() -> None:
                   "end_exclusive": args.start_index + args.limit, "n": args.limit},
         "sampling": {"weight_source": args.weights, "seed": args.seed,
                      "restarts": args.restarts, "innerloop_steps": args.innerloop_steps,
-                     "diffusion_landscapes": 10, "update_rule": "released_code_exact"},
+                     "diffusion_landscapes": 10,
+                     "reverse_noise": args.reverse_noise,
+                     "update_rule": (
+                         "released_code_with_reverse_noise_diagnostic"
+                         if args.reverse_noise else "released_code_exact"
+                     )},
         "trajectory": trajectory,
         "restart_selection": restarts,
         "wall_seconds": time.time() - started,
