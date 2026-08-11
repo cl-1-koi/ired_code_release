@@ -1,6 +1,6 @@
 {
   "schema": "ired/resource-ledger-v1",
-  "updated_utc": "2026-08-11T15:24:00Z",
+  "updated_utc": "2026-08-11T18:00:00Z",
   "source": {
     "repository": "/home/ubuntu/ired-sudoku-repro-20260809",
     "commit": "b9423ed33e70ef866769db974c4fe7a6fc6e21f9"
@@ -10,7 +10,8 @@
     "a10_220_owner": "FactionWar session",
     "ired_gpu_use_on_local_a10_prohibited": true,
     "ired_gpu_use_on_a10_220_prohibited": true,
-    "allowed_runpod_pod_id": "bk223asss2nj7a",
+    "allowed_runpod_pod_id": "0idy3tz5h7pwcd",
+    "authorized_replacement_for": "bk223asss2nj7a",
     "create_or_resume_other_paid_pod_without_owner_authorization": false
   },
   "resources": [
@@ -48,6 +49,25 @@
       "queued_next_experiment": "Run full 2048-board RRN-valid evaluations for EC-C0-50600 and EC-T2-50600 from source commit b9423ed, then select the consolidation arm using the declared standard/RRN gates.",
       "handoff_condition": "Owner restores bk223asss2nj7a or explicitly authorizes a replacement RunPod.",
       "retain_or_terminate_rationale": "No action is possible: this pod was terminated on 2026-08-08 and is absent from the current account inventory. Wait rather than use either A10 or create another paid pod."
+    },
+    {
+      "resource_id": "0idy3tz5h7pwcd",
+      "kind": "runpod_gpu",
+      "name": "ired-ec-hard-eval-20260811",
+      "hardware": "1x A40, 9 API vCPUs, 7.65-vCPU cgroup quota, 50 GiB RAM",
+      "hourly_cost_usd": 0.44,
+      "state": "running_ec_c0_rrn_valid",
+      "created_utc": "2026-08-11T17:56:55Z",
+      "last_audited_utc": "2026-08-11T18:02:15Z",
+      "active_runner_pid": 519,
+      "active_evaluator_pid": 522,
+      "experiment": "Sequential paired 2,048-board RRN-valid evaluation of EC-C0-50600 and EC-T2-50600",
+      "source_commit": "fb2a4350553d5e519dbf59982c95fa4375cbbc7b",
+      "artifact_location": "/workspace/ired-output and /workspace/ired-ops; durable closure at /home/ubuntu/ired-sudoku-data/runpod-ec-eval-20260811",
+      "termination_condition": "After the selected arm's declared 18,000-board hard-test follow-up is synced and verified, terminate if no additional approved follow-up is ready.",
+      "queued_next_experiment": "Apply the EC gate and evaluate the selected endpoint on the untouched 18,000-board RRN hard-test split.",
+      "watcher_can_terminate_pod": false,
+      "retain_or_terminate_rationale": "Retain through the declared validation-to-hard-test handoff so the ordinary A40 stays productive and avoids reprovisioning delay."
     }
   ],
   "interrupted_work": {
