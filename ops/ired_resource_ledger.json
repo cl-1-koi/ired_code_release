@@ -1,6 +1,6 @@
 {
   "schema": "ired/resource-ledger-v1",
-  "updated_utc": "2026-08-11T18:00:00Z",
+  "updated_utc": "2026-08-11T18:50:30Z",
   "source": {
     "repository": "/home/ubuntu/ired-sudoku-repro-20260809",
     "commit": "b9423ed33e70ef866769db974c4fe7a6fc6e21f9"
@@ -56,18 +56,24 @@
       "name": "ired-ec-hard-eval-20260811",
       "hardware": "1x A40, 9 API vCPUs, 7.65-vCPU cgroup quota, 50 GiB RAM",
       "hourly_cost_usd": 0.44,
-      "state": "running_ec_c0_rrn_valid",
+      "state": "terminated_after_verified_closure",
       "created_utc": "2026-08-11T17:56:55Z",
-      "last_audited_utc": "2026-08-11T18:02:15Z",
-      "active_runner_pid": 519,
-      "active_evaluator_pid": 522,
+      "last_audited_utc": "2026-08-11T18:50:30Z",
+      "initial_runner_pid": 519,
+      "initial_evaluator_pid": 522,
       "experiment": "Sequential paired 2,048-board RRN-valid evaluation of EC-C0-50600 and EC-T2-50600",
       "source_commit": "fb2a4350553d5e519dbf59982c95fa4375cbbc7b",
-      "artifact_location": "/workspace/ired-output and /workspace/ired-ops; durable closure at /home/ubuntu/ired-sudoku-data/runpod-ec-eval-20260811",
-      "termination_condition": "After the selected arm's declared 18,000-board hard-test follow-up is synced and verified, terminate if no additional approved follow-up is ready.",
-      "queued_next_experiment": "Apply the EC gate and evaluate the selected endpoint on the untouched 18,000-board RRN hard-test split.",
+      "reannealing_source_commit": "c7b595cf6d9afe1e5ff5d3f55112a3d8d486ff42",
+      "artifact_location": "/home/ubuntu/ired-sudoku-data/runpod-ec-eval-20260811",
+      "artifact_closure": "Initial gate 32/32 and reannealing isolation 35/35 references passed at both live-pod and durable-copy gates with zero conflicts.",
+      "result": "EC-C0 172/2048, EC-T2 164/2048, ER-O 170/2048, ER-G 167/2048 versus parent 177 and base50k 115. All children failed the declared 174-solve RRN gate; untouched hard-test was not opened.",
+      "terminated_utc": "2026-08-11T18:50:30Z",
+      "runpod_inventory_absent_verified": true,
+      "approximate_total_cost_usd": 0.39,
+      "termination_condition": "Satisfied after both declared isolation mechanisms failed and all artifacts passed durable closure.",
+      "queued_next_experiment": "No GPU arm is ready. Freeze SN-T2-50400 and first declare a short-horizon gradient/trajectory-geometry diagnostic that separates objective gradients, data-distribution gradients, and Adam-preconditioned updates.",
       "watcher_can_terminate_pod": false,
-      "retain_or_terminate_rationale": "Retain through the declared validation-to-hard-test handoff so the ordinary A40 stays productive and avoids reprovisioning delay."
+      "retain_or_terminate_rationale": "Terminated: this ordinary A40 had no passing endpoint and no precisely declared compatible GPU follow-up after verified artifact closure."
     }
   ],
   "interrupted_work": {
