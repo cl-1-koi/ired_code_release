@@ -6,6 +6,7 @@ from repro.sudoku_energy_calibration import (
     exact_conflict_energy,
 )
 from repro.sudoku_exact_annealing import initialize_boxes, row_column_energy
+from repro.sudoku_search_calibration import spearman
 from repro.sudoku_metrics import decode_digits
 
 
@@ -70,3 +71,9 @@ def test_exact_annealer_initialization_preserves_clues_and_boxes():
     box_energy = exact_conflict_energy(grid.unsqueeze(0)) - row_column_energy(grid)
     assert int(box_energy[0]) == 0
     assert mutable
+
+
+def test_restart_rank_correlation_is_within_vector_and_handles_ties():
+    assert spearman(torch.tensor([1.0, 2.0, 3.0]), torch.tensor([4.0, 5.0, 6.0])) == 1.0
+    assert spearman(torch.tensor([1.0, 2.0, 3.0]), torch.tensor([6.0, 5.0, 4.0])) == -1.0
+    assert spearman(torch.tensor([1.0, 1.0]), torch.tensor([2.0, 3.0])) is None

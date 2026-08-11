@@ -151,7 +151,7 @@ def evaluate_search(
     device = next(model.parameters()).device
     trajectory = defaultdict(Accumulator)
     restart_metrics = defaultdict(Accumulator)
-    selection_pairs = defaultdict(lambda: {"energy": [], "conflict": [], "errors": []})
+    within_board_correlations = defaultdict(lambda: {"conflict": [], "errors": []})
     end = start_index + limit
     for offset in range(start_index, end, batch_size):
         batch_end = min(end, offset + batch_size)
@@ -230,9 +230,20 @@ def evaluate_search(
                 (1 - metric.unknown_cell_accuracy.to(device)) * blank_count
                 for metric in all_metrics
             ])
-            selection_pairs[prefix]["energy"].append(prefix_energy.detach().cpu().reshape(-1))
-            selection_pairs[prefix]["conflict"].append(all_conflicts.cpu().reshape(-1))
-            selection_pairs[prefix]["errors"].append(all_errors.cpu().reshape(-1))
+            if prefix >= 2:
+                for board in range(len(inp)):
+                    conflict_correlation = spearman(
+                        prefix_energy[:, board], all_conflicts[:, board]
+                    )
+                    error_correlation = spearman(
+                        prefix_energy[:, board], all_errors[:, board]
+                    )
+                    if conflict_correlation is not None:
+                        within_board_correlations[prefix]["conflict"].append(
+                            conflict_correlation
+                        )
+                    if error_correlation is not None:
+                        within_board_correlations[prefix]["errors"].append(error_correlation)
 
     trajectory_records = []
     for timestep in sorted(trajectory, reverse=True):
@@ -254,10 +265,7 @@ def evaluate_search(
     restart_records = []
     for prefix in sorted(restart_metrics):
         values = restart_metrics[prefix]
-        pairs = selection_pairs[prefix]
-        energy = torch.cat(pairs["energy"])
-        conflicts = torch.cat(pairs["conflict"])
-        errors = torch.cat(pairs["errors"])
+        correlations = within_board_correlations[prefix]
         restart_records.append({
             "restart_prefix": prefix,
             "n_boards": len(values.tensor("first_solved")),
@@ -270,8 +278,16 @@ def evaluate_search(
             "fraction_boards_with_restart_diversity": values.mean("restart_diverse"),
             "mean_unique_decoded_boards": values.mean("unique_decoded_boards"),
             "mean_hamming_cells_from_first_restart": values.mean("hamming_from_first"),
-            "spearman_energy_vs_exact_conflict": spearman(energy, conflicts),
-            "spearman_energy_vs_unknown_errors": spearman(energy, errors),
+            "within_board_spearman_n_exact_conflict": len(correlations["conflict"]),
+            "within_board_spearman_energy_vs_exact_conflict": (
+                sum(correlations["conflict"]) / len(correlations["conflict"])
+                if correlations["conflict"] else None
+            ),
+            "within_board_spearman_n_unknown_errors": len(correlations["errors"]),
+            "within_board_spearman_energy_vs_unknown_errors": (
+                sum(correlations["errors"]) / len(correlations["errors"])
+                if correlations["errors"] else None
+            ),
         })
     return trajectory_records, restart_records
 
