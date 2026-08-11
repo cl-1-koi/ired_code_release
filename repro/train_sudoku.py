@@ -199,6 +199,7 @@ def source_hashes(repo: Path) -> dict:
         "IRED_SUDOKU_REPRO_SPEC_20260809.md",
         "IRED_SUDOKU_SEARCH_NEGATIVE_SPEC_20260811.md",
         "IRED_SUDOKU_DATA_COVERAGE_SPEC_20260811.md",
+        "IRED_SUDOKU_EXPAND_CONTRACT_SPEC_20260811.md",
     ]
     return {name: sha256_file(repo / name) for name in names if (repo / name).is_file()}
 
@@ -365,6 +366,24 @@ def make_extension_manifest(
             "compare paired control/treatment on full SATNet validation and a "
             "fixed RRN-hard panel before any longer continuation"
         )
+        parent_negative_steps = int(
+            parent_manifest.get("model", {}).get("contrastive_negative_opt_steps", 0)
+        )
+        if parent_negative_steps > 0 and parent_step > 50000:
+            content["lineage"]["kind"] = (
+                "post_search_negative_mixed_data_consolidation"
+                if args.sudoku_negative_opt_steps == 0
+                else "post_search_negative_mixed_data_continued_refinement"
+            )
+            content["lineage"]["reason"] = (
+                "start from the selected early search-negative checkpoint and "
+                "test whether broader data plus objective switching preserves "
+                "the transient standard/RRN gain"
+            )
+            content["execution"]["planned_handoff"] = (
+                "compare parent and paired children on full SATNet validation "
+                "and a fixed 2048-board RRN-validation slice at the 200-step gate"
+            )
     return {**content, "seal": {"sha256": sha256_json(content)}}
 
 

@@ -76,3 +76,18 @@ SHA-256, `first_9000` row selection, parent checkpoint/manifest hashes, parent
 and child batcher sizes, and the explicit lineage-start batcher reset.  RRN
 validation support is added to the frozen evaluators; outputs remain outside
 Git.
+
+## 50.2k health result
+
+The abrupt mixed-data bridge did not pass its continuation gate.  On the same
+2,048-board RRN-validation slice, prior-data `SN-C0`/`SN-T2` solve 112/183,
+whereas mixed-data `DC-C0`/`DC-T2` solve 106/123.  The mixed treatment also
+reduces full SATNet-validation unknown-cell accuracy from 99.3344% to 98.5654%,
+exceeding the declared 0.5 percentage-point allowance.  Both mixed arms are
+therefore frozen at 50,200 and must not continue to 51k.
+
+This negative result does not erase the selected `SN-T2` 50,400 gain.  It shows
+that introducing 50% harder-distribution data at the same time as the
+high-gradient search-negative objective is an unstable curriculum.  The next
+experiment starts from the already-improved 50,400 checkpoint and separates
+broad-data consolidation from continued search-negative pressure.
