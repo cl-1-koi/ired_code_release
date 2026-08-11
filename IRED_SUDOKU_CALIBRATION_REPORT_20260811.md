@@ -134,6 +134,9 @@ iterative failure to representation.
    states at the same landscape, with a held-out early-stop gate.  The released
    5% random digit corruption already teaches pairwise ordering but does not
    guarantee corrective geometry along the sampler's own state distribution.
+   Concretely, start with two detached energy-optimization steps on each Sudoku
+   contrastive negative.  This ports the released continuous-task negative
+   refinement into the Sudoku branch instead of introducing a new optimizer.
 5. Keep that arm separate from procedural-data expansion.  If search-state
    exposure improves train-like but not RRN-hard geometry, the next test is
    fresh generated Sudoku training data rather than additional epochs over the

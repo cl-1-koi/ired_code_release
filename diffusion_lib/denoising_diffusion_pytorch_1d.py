@@ -179,6 +179,7 @@ class GaussianDiffusion1D(nn.Module):
         connectivity = False,
         shortest_path = False,
         innerloop_steps = None,
+        sudoku_negative_opt_steps = 0,
     ):
         super().__init__()
         self.model = model
@@ -213,6 +214,9 @@ class GaussianDiffusion1D(nn.Module):
         self.continuous = continuous
         self.shortest_path = shortest_path
         self.innerloop_steps = innerloop_steps
+        if int(sudoku_negative_opt_steps) != sudoku_negative_opt_steps or sudoku_negative_opt_steps < 0:
+            raise ValueError('sudoku_negative_opt_steps must be a non-negative integer')
+        self.sudoku_negative_opt_steps = int(sudoku_negative_opt_steps)
 
         # sampling related parameters
 
@@ -684,6 +688,17 @@ class GaussianDiffusion1D(nn.Module):
 
             if mask is not None:
                 xmin_noise = xmin_noise * (1 - mask) + mask * data_cond
+
+            # The released Sudoku path contrasts against a one-shot random
+            # digit corruption.  This opt-in intervention applies the same
+            # short energy-optimization hard-negative refinement used by the
+            # released continuous-task path.  Defaults to zero, preserving the
+            # paper-reproduction arm exactly.
+            if self.sudoku and self.sudoku_negative_opt_steps > 0:
+                xmin_noise = self.opt_step(
+                    inp, xmin_noise, t, mask, data_cond,
+                    step=self.sudoku_negative_opt_steps, sf=1.0,
+                ).detach()
 
             # Compute energy of both distributions
             inp_concat = torch.cat([inp, inp], dim=0)

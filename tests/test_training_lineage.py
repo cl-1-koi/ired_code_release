@@ -30,3 +30,12 @@ def test_paper_table_10_final_convolution_is_explicit_arm():
 def test_unknown_final_convolution_is_rejected():
     with pytest.raises(ValueError, match="must be 1 or 3"):
         build_model(729, 729, final_conv_kernel=5)
+
+
+def test_sudoku_search_state_negative_refinement_is_explicit_and_opt_in():
+    released = build_model(729, 729)
+    assert released.sudoku_negative_opt_steps == 0
+    refined = build_model(729, 729, sudoku_negative_opt_steps=2)
+    assert refined.sudoku_negative_opt_steps == 2
+    with pytest.raises(ValueError, match="non-negative integer"):
+        build_model(729, 729, sudoku_negative_opt_steps=-1)

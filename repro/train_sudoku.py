@@ -98,6 +98,7 @@ class StatefulPermutationBatcher:
 def build_model(
     inp_dim: int, out_dim: int, innerloop_steps: int = 20,
     final_conv_kernel: int = 1,
+    sudoku_negative_opt_steps: int = 0,
 ):
     if final_conv_kernel not in (1, 3):
         raise ValueError("final_conv_kernel must be 1 or 3")
@@ -118,6 +119,7 @@ def build_model(
         show_inference_tqdm=False,
         sudoku=True,
         innerloop_steps=innerloop_steps,
+        sudoku_negative_opt_steps=sudoku_negative_opt_steps,
     )
     return diffusion
 
@@ -181,6 +183,12 @@ def make_manifest(args, dataset, model, repo: Path, data_root: Path) -> dict:
             "diffusion_landscapes": 10,
             "inner_gradient_steps_per_landscape": 20,
             "contrastive_cell_corruption_probability": 0.05,
+            "contrastive_negative_opt_steps": args.sudoku_negative_opt_steps,
+            "contrastive_negative_variant": (
+                "released_random_digit_corruption"
+                if args.sudoku_negative_opt_steps == 0
+                else "random_digit_corruption_then_energy_refinement"
+            ),
         },
         "training": {
             "seed": args.seed, "batch_size": args.batch_size,
@@ -214,6 +222,11 @@ def verify_manifest(manifest: dict, args) -> str:
         args.seed, args.batch_size, args.target_steps
     ):
         raise RuntimeError("training contract changed")
+    manifest_negative_steps = int(
+        manifest.get("model", {}).get("contrastive_negative_opt_steps", 0)
+    )
+    if manifest_negative_steps != args.sudoku_negative_opt_steps:
+        raise RuntimeError("contrastive negative refinement changed")
     return seal
 
 
@@ -248,8 +261,8 @@ def make_extension_manifest(
     content["lineage"] = {
         "kind": "exact_resume_target_extension",
         "reason": (
-            "paper-declared 50k endpoint under-reproduced; continue the exact "
-            "trajectory to the released code's 1.3M default"
+            "continue the exact 50k trajectory to the released code's 1.3M "
+            "default after the stronger strict whole-board gate missed"
         ),
         "parent_source_commit": parent_manifest["code"]["commit"],
         "parent_manifest": str(parent_manifest_path.resolve()),
@@ -264,6 +277,17 @@ def make_extension_manifest(
         "evaluate standard and hard sets over inference steps "
         "{1,5,10,15,20,40,80} at 100k, 300k, 1M, and 1.3M"
     )
+    if args.sudoku_negative_opt_steps > 0:
+        content["lineage"]["kind"] = "warm_start_search_state_negative_intervention"
+        content["lineage"]["reason"] = (
+            "apply the released continuous-task hard-negative refinement to "
+            "Sudoku contrastive corruptions; frozen diagnostics found good "
+            "pairwise energy ordering but weak sampler-state geometry"
+        )
+        content["execution"]["planned_handoff"] = (
+            "evaluate the held-out energy/gradient calibration and fixed "
+            "standard/hard strict metrics before any further continuation"
+        )
     return {**content, "seal": {"sha256": sha256_json(content)}}
 
 
@@ -292,6 +316,7 @@ def main() -> None:
     parser.add_argument("--log-every", type=int, default=20)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--final-conv-kernel", type=int, choices=(1, 3), default=1)
+    parser.add_argument("--sudoku-negative-opt-steps", type=int, default=0)
     parser.add_argument("--resume", default=None)
     parser.add_argument(
         "--parent-manifest", default=None,
@@ -301,6 +326,8 @@ def main() -> None:
     args = parser.parse_args()
     if not 0 < args.stop_after_step <= args.target_steps:
         raise SystemExit("stop-after-step must be in 1..target-steps")
+    if args.sudoku_negative_opt_steps < 0:
+        raise SystemExit("sudoku-negative-opt-steps must be non-negative")
     if not torch.cuda.is_available():
         raise SystemExit("CUDA is required")
 
@@ -317,6 +344,7 @@ def main() -> None:
     model = build_model(
         dataset.inp_dim, dataset.out_dim,
         final_conv_kernel=args.final_conv_kernel,
+        sudoku_negative_opt_steps=args.sudoku_negative_opt_steps,
     ).to(device)
     optimizer = Adam(model.parameters(), lr=1e-4, betas=(0.9, 0.99))
     ema = EMA(model, beta=0.995, update_every=10).to(device)
