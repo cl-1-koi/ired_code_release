@@ -61,6 +61,14 @@ repair the later checkpoints.  At 50k, hard strict solving rises only from
 This rules out "train longer" and "take more deterministic gradient steps" as
 primary remedies.
 
+The endpoint metric and the paper's claimed inference-scaling mechanism must
+therefore be separated.  Although the likely Table 4 hard endpoint is matched,
+our hard unknown-cell accuracy slightly *falls* from 64.21% at one inner step
+to 63.47% at 80; it does not reproduce Figure 6's claimed substantial gain
+from extra optimization.  The stochastic population result below restores a
+positive compute curve by expanding coverage rather than repeating the same
+deterministic descent.
+
 ## Learned landscape calibration
 
 Controlled corruptions change only non-clue cells at exact edit distances
