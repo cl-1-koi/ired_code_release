@@ -5,7 +5,12 @@ from repro.sudoku_energy_calibration import (
     corrupt_solutions,
     exact_conflict_energy,
 )
-from repro.sudoku_exact_annealing import initialize_boxes, row_column_energy
+from repro.sudoku_exact_annealing import (
+    _apply_swap_counts,
+    _duplicate_energy,
+    initialize_boxes,
+    row_column_energy,
+)
 from repro.sudoku_search_calibration import spearman
 from repro.sudoku_metrics import decode_digits
 
@@ -77,3 +82,26 @@ def test_restart_rank_correlation_is_within_vector_and_handles_ties():
     assert spearman(torch.tensor([1.0, 2.0, 3.0]), torch.tensor([4.0, 5.0, 6.0])) == 1.0
     assert spearman(torch.tensor([1.0, 2.0, 3.0]), torch.tensor([6.0, 5.0, 4.0])) == -1.0
     assert spearman(torch.tensor([1.0, 1.0]), torch.tensor([2.0, 3.0])) is None
+
+
+def test_incremental_swap_energy_matches_full_recomputation():
+    import numpy as np
+
+    grid = SOLUTION.clone()
+    grid[0, 0], grid[1, 1] = grid[1, 1].clone(), grid[0, 0].clone()
+    array = grid.numpy().copy()
+    row_counts = np.zeros((9, 9), dtype=np.int16)
+    column_counts = np.zeros((9, 9), dtype=np.int16)
+    for row in range(9):
+        for col in range(9):
+            row_counts[row, array[row, col]] += 1
+            column_counts[col, array[row, col]] += 1
+    before = _duplicate_energy(row_counts) + _duplicate_energy(column_counts)
+    first, second = (0, 0), (1, 0)
+    first_digit, second_digit = int(array[first]), int(array[second])
+    delta = _apply_swap_counts(
+        row_counts, column_counts, first, second, first_digit, second_digit
+    )
+    array[first], array[second] = second_digit, first_digit
+    after = row_column_energy(torch.from_numpy(array))
+    assert before + delta == after

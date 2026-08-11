@@ -12,6 +12,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import torch
+import numpy as np
+
+try:
+    from numba import njit
+except ImportError:  # pragma: no cover - exercised only in minimal environments
+    njit = None
 
 from repro.sudoku_energy_calibration import exact_conflict_energy, load_dataset
 from repro.sudoku_metrics import clue_cells, decode_digits, strict_validity
@@ -32,6 +38,150 @@ def row_column_energy(grid: torch.Tensor) -> int:
     rows = onehot.sum(dim=1)
     columns = onehot.sum(dim=0)
     return int((rows - 1).clamp_min(0).sum() + (columns - 1).clamp_min(0).sum())
+
+
+def _duplicate_energy(counts: np.ndarray) -> int:
+    return int(np.maximum(counts - 1, 0).sum())
+
+
+def _apply_count_change(
+    counts: np.ndarray, group: int, digit: int, change: int
+) -> int:
+    before = max(int(counts[group, digit]) - 1, 0)
+    counts[group, digit] += change
+    after = max(int(counts[group, digit]) - 1, 0)
+    return after - before
+
+
+def _apply_swap_counts(
+    row_counts: np.ndarray,
+    column_counts: np.ndarray,
+    first: tuple[int, int],
+    second: tuple[int, int],
+    first_digit: int,
+    second_digit: int,
+) -> int:
+    """Apply a proposed swap to count tables and return its exact energy delta."""
+    if first_digit == second_digit:
+        return 0
+    first_row, first_col = first
+    second_row, second_col = second
+    delta = 0
+    if first_row != second_row:
+        delta += _apply_count_change(row_counts, first_row, first_digit, -1)
+        delta += _apply_count_change(row_counts, first_row, second_digit, 1)
+        delta += _apply_count_change(row_counts, second_row, second_digit, -1)
+        delta += _apply_count_change(row_counts, second_row, first_digit, 1)
+    if first_col != second_col:
+        delta += _apply_count_change(column_counts, first_col, first_digit, -1)
+        delta += _apply_count_change(column_counts, first_col, second_digit, 1)
+        delta += _apply_count_change(column_counts, second_col, second_digit, -1)
+        delta += _apply_count_change(column_counts, second_col, first_digit, 1)
+    return delta
+
+
+if njit is not None:
+    @njit(cache=True)
+    def _numba_penalty(count: int) -> int:
+        return count - 1 if count > 1 else 0
+
+
+    @njit(cache=True)
+    def _numba_change(counts, group: int, digit: int, change: int) -> int:
+        before = _numba_penalty(counts[group, digit])
+        counts[group, digit] += change
+        return _numba_penalty(counts[group, digit]) - before
+
+
+    @njit(cache=True)
+    def _numba_swap_delta(
+        row_counts, column_counts, first_row, first_col, second_row, second_col,
+        first_digit, second_digit,
+    ) -> int:
+        if first_digit == second_digit:
+            return 0
+        delta = 0
+        if first_row != second_row:
+            delta += _numba_change(row_counts, first_row, first_digit, -1)
+            delta += _numba_change(row_counts, first_row, second_digit, 1)
+            delta += _numba_change(row_counts, second_row, second_digit, -1)
+            delta += _numba_change(row_counts, second_row, first_digit, 1)
+        if first_col != second_col:
+            delta += _numba_change(column_counts, first_col, first_digit, -1)
+            delta += _numba_change(column_counts, first_col, second_digit, 1)
+            delta += _numba_change(column_counts, second_col, second_digit, -1)
+            delta += _numba_change(column_counts, second_col, first_digit, 1)
+        return delta
+
+
+    @njit(cache=True)
+    def _numba_anneal(
+        initial_grid, mutable_positions, mutable_lengths, steps,
+        start_temperature, cooling, seed,
+    ):
+        np.random.seed(seed)
+        grid = initial_grid.copy()
+        row_counts = np.zeros((9, 9), dtype=np.int16)
+        column_counts = np.zeros((9, 9), dtype=np.int16)
+        for row in range(9):
+            for col in range(9):
+                digit = grid[row, col]
+                row_counts[row, digit] += 1
+                column_counts[col, digit] += 1
+        energy = 0
+        for group in range(9):
+            for digit in range(9):
+                energy += _numba_penalty(row_counts[group, digit])
+                energy += _numba_penalty(column_counts[group, digit])
+        best_energy = energy
+        best_grid = grid.copy()
+        accepted = 0
+        temperature = start_temperature
+        no_improvement = 0
+        for proposal in range(steps):
+            box = np.random.randint(len(mutable_lengths))
+            length = mutable_lengths[box]
+            first_offset = np.random.randint(length)
+            second_offset = np.random.randint(length - 1)
+            if second_offset >= first_offset:
+                second_offset += 1
+            first_row = mutable_positions[box, first_offset, 0]
+            first_col = mutable_positions[box, first_offset, 1]
+            second_row = mutable_positions[box, second_offset, 0]
+            second_col = mutable_positions[box, second_offset, 1]
+            first_digit = grid[first_row, first_col]
+            second_digit = grid[second_row, second_col]
+            delta = _numba_swap_delta(
+                row_counts, column_counts, first_row, first_col, second_row,
+                second_col, first_digit, second_digit,
+            )
+            accept = delta <= 0 or np.random.random() < math.exp(
+                -delta / max(temperature, 1e-9)
+            )
+            if accept:
+                grid[first_row, first_col] = second_digit
+                grid[second_row, second_col] = first_digit
+                energy += delta
+                accepted += 1
+                if energy < best_energy:
+                    best_energy = energy
+                    best_grid = grid.copy()
+                    no_improvement = 0
+                else:
+                    no_improvement += 1
+            else:
+                _numba_swap_delta(
+                    row_counts, column_counts, first_row, first_col, second_row,
+                    second_col, second_digit, first_digit,
+                )
+                no_improvement += 1
+            if energy == 0:
+                return grid, 0, proposal + 1, accepted
+            temperature *= cooling
+            if no_improvement >= 5_000:
+                temperature = max(0.5 * start_temperature, temperature)
+                no_improvement = 0
+        return best_grid, best_energy, steps, accepted
 
 
 def initialize_boxes(
@@ -69,7 +219,13 @@ def anneal_board(
     steps_per_restart: int,
     start_temperature: float,
     cooling: float,
+    engine: str = "auto",
 ) -> dict:
+    if engine not in ("auto", "python", "numba"):
+        raise ValueError(engine)
+    use_numba = engine == "numba" or (engine == "auto" and njit is not None)
+    if engine == "numba" and njit is None:
+        raise RuntimeError("numba engine requested but numba is not installed")
     generator = random.Random(seed)
     best_grid = None
     best_energy = 10**9
@@ -83,7 +239,42 @@ def anneal_board(
             return {"grid": grid, "energy": energy, "solved": energy == 0,
                     "proposals": total_proposals, "accepted": total_accepted,
                     "restarts": restart + 1}
-        energy = row_column_energy(grid)
+        if use_numba:
+            positions = np.zeros((len(mutable_boxes), 9, 2), dtype=np.int64)
+            lengths = np.zeros(len(mutable_boxes), dtype=np.int64)
+            for box, mutable in enumerate(mutable_boxes):
+                lengths[box] = len(mutable)
+                for position, (row, col) in enumerate(mutable):
+                    positions[box, position] = (row, col)
+            candidate, energy, proposals, accepted = _numba_anneal(
+                grid.numpy().astype(np.int64),
+                positions,
+                lengths,
+                steps_per_restart,
+                start_temperature,
+                cooling,
+                seed + restart * 10_007,
+            )
+            total_proposals += int(proposals)
+            total_accepted += int(accepted)
+            candidate_grid = torch.from_numpy(candidate.copy())
+            if energy < best_energy:
+                best_energy, best_grid = int(energy), candidate_grid
+            if energy == 0:
+                return {"grid": candidate_grid, "energy": 0, "solved": True,
+                        "proposals": total_proposals, "accepted": total_accepted,
+                        "restarts": restart + 1}
+            completed_restarts = restart + 1
+            continue
+        grid_array = grid.numpy().copy()
+        row_counts = np.zeros((9, 9), dtype=np.int16)
+        column_counts = np.zeros((9, 9), dtype=np.int16)
+        for row in range(9):
+            for col in range(9):
+                digit = int(grid_array[row, col])
+                row_counts[row, digit] += 1
+                column_counts[col, digit] += 1
+        energy = _duplicate_energy(row_counts) + _duplicate_energy(column_counts)
         if energy < best_energy:
             best_energy, best_grid = energy, grid.clone()
         temperature = start_temperature
@@ -92,23 +283,33 @@ def anneal_board(
             total_proposals += 1
             positions = generator.choice(mutable_boxes)
             first, second = generator.sample(positions, 2)
-            grid[first], grid[second] = grid[second].clone(), grid[first].clone()
-            proposed = row_column_energy(grid)
-            delta = proposed - energy
+            first_digit = int(grid_array[first])
+            second_digit = int(grid_array[second])
+            delta = _apply_swap_counts(
+                row_counts, column_counts, first, second, first_digit, second_digit
+            )
+            proposed = energy + delta
             accept = delta <= 0 or generator.random() < math.exp(-delta / max(temperature, 1e-9))
             if accept:
+                grid_array[first], grid_array[second] = second_digit, first_digit
                 energy = proposed
                 total_accepted += 1
                 if energy < best_energy:
-                    best_energy, best_grid = energy, grid.clone()
+                    best_energy = energy
+                    best_grid = torch.from_numpy(grid_array.copy())
                     no_improvement = 0
                 else:
                     no_improvement += 1
             else:
-                grid[first], grid[second] = grid[second].clone(), grid[first].clone()
+                reverse_delta = _apply_swap_counts(
+                    row_counts, column_counts, first, second, second_digit, first_digit
+                )
+                if reverse_delta != -delta:
+                    raise RuntimeError("incremental energy rollback mismatch")
                 no_improvement += 1
             if energy == 0:
-                return {"grid": grid, "energy": 0, "solved": True,
+                solved_grid = torch.from_numpy(grid_array.copy())
+                return {"grid": solved_grid, "energy": 0, "solved": True,
                         "proposals": total_proposals, "accepted": total_accepted,
                         "restarts": restart + 1}
             temperature *= cooling
@@ -132,6 +333,7 @@ def main() -> None:
     parser.add_argument("--steps-per-restart", type=int, default=100_000)
     parser.add_argument("--start-temperature", type=float, default=2.0)
     parser.add_argument("--cooling", type=float, default=0.9995)
+    parser.add_argument("--engine", choices=("auto", "python", "numba"), default="auto")
     parser.add_argument("--seed", type=int, default=20260811)
     args = parser.parse_args()
     if min(args.limit, args.restarts, args.steps_per_restart) < 1:
@@ -155,6 +357,7 @@ def main() -> None:
             steps_per_restart=args.steps_per_restart,
             start_temperature=args.start_temperature,
             cooling=args.cooling,
+            engine=args.engine,
         )
         reference = decode_digits(label.unsqueeze(0))[0]
         strict = bool(strict_validity(result["grid"].unsqueeze(0))[0])
@@ -180,6 +383,7 @@ def main() -> None:
         "search": {"seed": args.seed, "restarts": args.restarts,
                    "steps_per_restart": args.steps_per_restart,
                    "start_temperature": args.start_temperature, "cooling": args.cooling,
+                   "engine": ("numba" if args.engine == "auto" and njit is not None else args.engine),
                    "box_legality_preserved": True,
                    "energy": "row_and_column_duplicate_count"},
         "metrics": {
