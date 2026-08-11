@@ -109,6 +109,31 @@ metrics, with strict whole-board validity remaining primary; the paper does
 not define which of the released evaluator's `accuracy`, `consistency`, or
 `board_accuracy` fields generated Table 4.
 
+### Metric-interpretation addendum (2026-08-11)
+
+The earlier statement that the 50k run under-reproduced Table 4 by comparing
+strict whole-board solves directly to 99.4%/62.1% is not a like-for-like
+comparison and is withdrawn as a paper-metric verdict.  The paper calls its
+quantity "accuracy" without defining which released evaluator field it used.
+The released `sudoku_accuracy` function emits:
+
+- `accuracy`: accuracy over unknown cells;
+- `consistency`: strict row/column/box validity rate;
+- `board_accuracy`: the released weak sum-constraint fraction.
+
+At 50k, the sealed seed-42 run obtains 97.7861% unknown-cell accuracy on
+standard validation and 63.4313% on RRN hard, compared with the paper's 99.4%
+and 62.1%.  The hard result differs by only +1.33 percentage points and the
+standard result by -1.61 points.  Together with the released field name, this
+is strong evidence that Table 4 reports unknown-cell accuracy.  Under that
+interpretation, the paper result is approximately reproduced.  Because no
+paper artifact unambiguously maps Table 4 to a field, reports must retain that
+qualification.
+
+Strict valid/clue-consistent solve rate remains our primary application-facing
+metric (76.9% standard, 4.4667% hard at 50k), but it is an added stronger gate,
+not the appropriate denominator for claiming failure against Table 4.
+
 ## RunPod policy for this ladder
 
 Once R0 is healthy, the queued next experiment is `R1 resume-to-50k`; the pod
