@@ -70,3 +70,28 @@ released reproduction path.  The setting and variant name are included in the
 training manifest; resuming with a different value fails manifest verification.
 Treatment lineage is labeled `warm_start_search_state_negative_intervention`.
 Outputs and checkpoints remain outside Git.
+
+## Result and stop decision
+
+Both arms reached 51,000 from the identical signed 50k state.  At the 50,200
+health gate, the treatment's EMA improved strict solving on the fixed 256-board
+panels from 76.95% to 92.19% standard and from 5.08% to 6.64% RRN-hard.  The
+standard gain persisted at 50,400 (92.58% versus 76.17%).
+
+At 51k, full standard-validation strict solving was 90.7% for `SN-T2` versus
+75.7% for `SN-C0`, and unknown-cell accuracy was 99.2375% versus 97.6305%.
+The fixed RRN-hard gate reversed: `SN-T2` solved 8/256 (3.125%) versus 16/256
+(6.25%) for `SN-C0`, with essentially equal unknown-cell accuracy (63.2969%
+versus 63.3999%).  The treatment's standard gain therefore does not establish
+generalized reasoning.
+
+Training was finite but aggressive: over the full 1,000-step treatment,
+mean pre-clip gradient norm was 23.50 with a maximum of 357.61, versus
+0.122/0.195 for control.  EMA pair diagnostics improved continuous corrective
+cosine at intermediate landscapes, but discrete Hamming repair declined.  This
+combination explains why pairwise energy ordering alone was not accepted as a
+success criterion.
+
+The predeclared train-like-only decision rule fired.  Both arms are frozen at
+51k and must not continue to 55k/60k.  The next separate arm changes data
+coverage while preserving this control/treatment distinction.

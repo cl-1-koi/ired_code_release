@@ -30,7 +30,7 @@ def load_satnet_dataset(data_dir):
     return features, labels
 
 
-def load_rrn_dataset(data_dir, split):
+def load_rrn_dataset(data_dir, split, limit=None):
     if not osp.exists(data_dir):
         raise ValueError(f'Data directory {data_dir} does not exist. Run data/download-rrn.sh to download the dataset.')
 
@@ -41,7 +41,7 @@ def load_rrn_dataset(data_dir, split):
     }
 
     filename = osp.join(data_dir, split_to_filename[split])
-    df = pd.read_csv(filename, header=None)
+    df = pd.read_csv(filename, header=None, nrows=limit)
 
     def str2onehot(x):
         x = np.array(list(map(int, x)), dtype='int64')
@@ -104,9 +104,11 @@ def _rescale(x):
 
 
 class SudokuRRNDataset(Dataset):
-    def __init__(self, dataset_identifier, split):
+    def __init__(self, dataset_identifier, split, limit=None):
         assert dataset_identifier == 'sudoku-rrn'
-        self.features, self.labels = load_rrn_dataset(get_data_dir(dataset_identifier), split)
+        self.features, self.labels = load_rrn_dataset(
+            get_data_dir(dataset_identifier), split, limit=limit
+        )
 
         self.cond_entry = (self.features.sum(axis=-1) == 1)[:, :, :, None].expand(-1, -1, -1, 9)
         self.inp_dim = self.features[0].numel()

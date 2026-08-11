@@ -20,7 +20,7 @@ from torch.optim import Adam
 
 from diffusion_lib.denoising_diffusion_pytorch_1d import GaussianDiffusion1D
 from models import DiffusionWrapper, SudokuEBM
-from sat_dataset import SudokuDataset
+from sat_dataset import SudokuDataset, SudokuRRNDataset
 
 
 UPSTREAM_COMMIT = "3d74b85fab7fcf5e28aaf15e9ed3bf51c1a1d545"
@@ -29,6 +29,7 @@ EXPECTED_DATA = {
     "sudoku/features.pt": "8349ff2a210f6a5bffc052dbddbde6b3461ef893122d19b375fc5dd2f444fbef",
     "sudoku/labels.pt": "596fa31210b143fed37252d2694caeb297e18998a8127d2c9a58897552da5ec8",
 }
+RRN_TRAIN_SHA256 = "797f8c6dddf9d138d67b86ad22990a839b951b4358c13d3aaf0d91171d30d8b5"
 
 
 def sha256_file(path: Path) -> str:
@@ -95,6 +96,40 @@ class StatefulPermutationBatcher:
         self.offset = int(state["offset"])
 
 
+class MixedSudokuTrainingDataset:
+    """Balanced finite bridge from SATNet-easy to the RRN clue distribution."""
+
+    def __init__(self):
+        standard = SudokuDataset("sudoku", split="train")
+        rrn = SudokuRRNDataset("sudoku-rrn", split="train", limit=len(standard))
+        self.features = torch.cat((standard.features, rrn.features), dim=0)
+        self.labels = torch.cat((standard.labels, rrn.labels), dim=0)
+        self.cond_entry = (
+            (self.features.sum(axis=-1) == 1)[:, :, :, None]
+            .expand(-1, -1, -1, 9)
+        )
+        self.inp_dim = self.features[0].numel()
+        self.out_dim = self.labels[0].numel()
+
+    def __len__(self):
+        return len(self.features)
+
+    def __getitem__(self, index):
+        return (
+            (self.features[index].reshape(-1) - 0.5) * 2,
+            (self.labels[index].reshape(-1) - 0.5) * 2,
+            self.cond_entry[index].reshape(-1),
+        )
+
+
+def load_training_dataset(name: str):
+    if name == "satnet-train":
+        return SudokuDataset("sudoku", split="train")
+    if name == "mixed-satnet-rrn9k":
+        return MixedSudokuTrainingDataset()
+    raise ValueError(f"unknown training dataset: {name}")
+
+
 def build_model(
     inp_dim: int, out_dim: int, innerloop_steps: int = 20,
     final_conv_kernel: int = 1,
@@ -124,7 +159,7 @@ def build_model(
     return diffusion
 
 
-def dataset_hashes(data_root: Path) -> dict:
+def dataset_hashes(data_root: Path, training_dataset: str) -> dict:
     values = {}
     for relative, expected in EXPECTED_DATA.items():
         path = data_root / relative
@@ -132,6 +167,18 @@ def dataset_hashes(data_root: Path) -> dict:
         if actual != expected:
             raise RuntimeError(f"dataset hash mismatch for {relative}: {actual}")
         values[relative] = {"bytes": path.stat().st_size, "sha256": actual}
+    if training_dataset == "mixed-satnet-rrn9k":
+        relative = "sudoku-rrn/train.csv"
+        path = data_root / relative
+        actual = sha256_file(path)
+        if actual != RRN_TRAIN_SHA256:
+            raise RuntimeError(f"dataset hash mismatch for {relative}: {actual}")
+        values[relative] = {
+            "bytes": path.stat().st_size,
+            "sha256": actual,
+            "rows_used": 9000,
+            "row_selection": "first_9000",
+        }
     return values
 
 
@@ -150,6 +197,8 @@ def source_hashes(repo: Path) -> dict:
         "ops/run_ired_sudoku_fidelity_arm.sh",
         "requirements-repro.txt",
         "IRED_SUDOKU_REPRO_SPEC_20260809.md",
+        "IRED_SUDOKU_SEARCH_NEGATIVE_SPEC_20260811.md",
+        "IRED_SUDOKU_DATA_COVERAGE_SPEC_20260811.md",
     ]
     return {name: sha256_file(repo / name) for name in names if (repo / name).is_file()}
 
@@ -169,7 +218,9 @@ def make_manifest(args, dataset, model, repo: Path, data_root: Path) -> dict:
         },
         "paper": {"title": "Learning Iterative Reasoning through Energy Diffusion",
                   "sha256": PAPER_SHA256, "declared_sudoku_steps": 50000},
-        "data": {"root": str(data_root), "files": dataset_hashes(data_root),
+        "data": {"root": str(data_root),
+                 "training_variant": args.training_dataset,
+                 "files": dataset_hashes(data_root, args.training_dataset),
                  "train_examples": len(dataset), "standard_validation_examples": 1000,
                  "hard_test_examples": 18000},
         "model": {
@@ -196,6 +247,8 @@ def make_manifest(args, dataset, model, repo: Path, data_root: Path) -> dict:
             "gradient_clip": 1.0, "ema_beta": 0.995, "ema_update_every": 10,
             "target_steps": args.target_steps, "precision": "float32",
             "stateful_shuffled_epoch_batches": True,
+            "reset_batcher_on_lineage_start": args.reset_batcher_on_lineage_start,
+            "batcher_initial_seed": args.seed + 1,
         },
         "execution": {
             "health_gate_step": 200,
@@ -222,6 +275,12 @@ def verify_manifest(manifest: dict, args) -> str:
         args.seed, args.batch_size, args.target_steps
     ):
         raise RuntimeError("training contract changed")
+    if manifest.get("data", {}).get("training_variant", "satnet-train") != args.training_dataset:
+        raise RuntimeError("training dataset changed")
+    if bool(training.get("reset_batcher_on_lineage_start", False)) != (
+        args.reset_batcher_on_lineage_start
+    ):
+        raise RuntimeError("batcher reset contract changed")
     manifest_negative_steps = int(
         manifest.get("model", {}).get("contrastive_negative_opt_steps", 0)
     )
@@ -272,6 +331,9 @@ def make_extension_manifest(
         "parent_checkpoint_sha256": sha256_file(parent_checkpoint_path),
         "parent_step": parent_step,
         "parent_target_steps": parent_training["target_steps"],
+        "parent_batcher_examples": int(parent_checkpoint["batcher"]["n"]),
+        "child_batcher_examples": len(dataset),
+        "batcher_reset_on_lineage_start": args.reset_batcher_on_lineage_start,
     }
     content["execution"]["planned_handoff"] = (
         "evaluate standard and hard sets over inference steps "
@@ -287,6 +349,21 @@ def make_extension_manifest(
         content["execution"]["planned_handoff"] = (
             "evaluate the held-out energy/gradient calibration and fixed "
             "standard/hard strict metrics before any further continuation"
+        )
+    if args.training_dataset == "mixed-satnet-rrn9k":
+        content["lineage"]["kind"] = (
+            "warm_start_mixed_data_search_negative_intervention"
+            if args.sudoku_negative_opt_steps > 0
+            else "warm_start_mixed_data_control"
+        )
+        content["lineage"]["reason"] = (
+            "the search-negative arm improved SATNet validation but failed its "
+            "RRN-hard generalization gate; add an equal-size RRN-train slice "
+            "while retaining all 9000 SATNet training boards"
+        )
+        content["execution"]["planned_handoff"] = (
+            "compare paired control/treatment on full SATNet validation and a "
+            "fixed RRN-hard panel before any longer continuation"
         )
     return {**content, "seal": {"sha256": sha256_json(content)}}
 
@@ -317,6 +394,12 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--final-conv-kernel", type=int, choices=(1, 3), default=1)
     parser.add_argument("--sudoku-negative-opt-steps", type=int, default=0)
+    parser.add_argument(
+        "--training-dataset",
+        choices=("satnet-train", "mixed-satnet-rrn9k"),
+        default="satnet-train",
+    )
+    parser.add_argument("--reset-batcher-on-lineage-start", action="store_true")
     parser.add_argument("--resume", default=None)
     parser.add_argument(
         "--parent-manifest", default=None,
@@ -339,7 +422,7 @@ def main() -> None:
     if repo in output.parents or output == repo:
         raise SystemExit("output directory must be outside the source tree")
     data_root = Path(os.environ.get("IRED_DATA_ROOT", repo / "data")).resolve()
-    dataset = SudokuDataset("sudoku", split="train")
+    dataset = load_training_dataset(args.training_dataset)
     device = torch.device("cuda", 0)
     model = build_model(
         dataset.inp_dim, dataset.out_dim,
@@ -351,6 +434,7 @@ def main() -> None:
     batcher = StatefulPermutationBatcher(len(dataset), args.batch_size, args.seed + 1)
 
     manifest_path = output / "training_manifest.json"
+    new_lineage = False
     if args.resume:
         # Keep process-global and batching RNG tensors on CPU. Optimizer/model
         # loaders copy their own tensors onto the CUDA parameters as needed.
@@ -359,6 +443,7 @@ def main() -> None:
             manifest = json.loads(manifest_path.read_text())
             expected_manifest_seal = verify_manifest(manifest, args)
         elif args.parent_manifest:
+            new_lineage = True
             parent_manifest_path = Path(args.parent_manifest).resolve()
             parent_manifest = json.loads(parent_manifest_path.read_text())
             manifest = make_extension_manifest(
@@ -375,7 +460,9 @@ def main() -> None:
         if payload["manifest_sha256"] != expected_manifest_seal:
             raise RuntimeError("checkpoint manifest mismatch")
         model.load_state_dict(payload["model"]); optimizer.load_state_dict(payload["optimizer"])
-        ema.load_state_dict(payload["ema"]); batcher.load_state_dict(payload["batcher"])
+        ema.load_state_dict(payload["ema"])
+        if not (new_lineage and args.reset_batcher_on_lineage_start):
+            batcher.load_state_dict(payload["batcher"])
         random.setstate(payload["rng"]["python"]); np.random.set_state(payload["rng"]["numpy"])
         torch.set_rng_state(payload["rng"]["torch"].cpu())
         torch.cuda.set_rng_state_all([state.cpu() for state in payload["rng"]["cuda"]])

@@ -58,6 +58,8 @@ def load_dataset(name: str):
         return SudokuDataset("sudoku", split="val")
     if name == "hard-test":
         return SudokuRRNDataset("sudoku-rrn", split="test")
+    if name == "rrn-valid":
+        return SudokuRRNDataset("sudoku-rrn", split="val")
     raise ValueError(name)
 
 
@@ -316,7 +318,7 @@ def main() -> None:
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument(
-        "--dataset", choices=("standard-train", "standard-val", "hard-test"),
+        "--dataset", choices=("standard-train", "standard-val", "hard-test", "rrn-valid"),
         default="standard-val",
     )
     parser.add_argument("--weights", choices=("raw", "ema", "both"), default="both")

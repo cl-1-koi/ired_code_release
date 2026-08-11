@@ -334,7 +334,10 @@ def main() -> None:
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--output-dir", required=True)
-    parser.add_argument("--dataset", choices=("standard-val", "hard-test"), default="standard-val")
+    parser.add_argument(
+        "--dataset", choices=("standard-val", "hard-test", "rrn-valid"),
+        default="standard-val",
+    )
     parser.add_argument("--weights", choices=("raw", "ema"), default="ema")
     parser.add_argument("--start-index", type=int, default=0)
     parser.add_argument("--limit", type=int, default=32)
