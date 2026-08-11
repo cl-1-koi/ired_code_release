@@ -1,0 +1,83 @@
+{
+  "schema": "ired/resource-ledger-v1",
+  "updated_utc": "2026-08-11T15:24:00Z",
+  "source": {
+    "repository": "/home/ubuntu/ired-sudoku-repro-20260809",
+    "commit": "b9423ed33e70ef866769db974c4fe7a6fc6e21f9"
+  },
+  "policy": {
+    "local_a10_owner": "FactionWar session",
+    "a10_220_owner": "FactionWar session",
+    "ired_gpu_use_on_local_a10_prohibited": true,
+    "ired_gpu_use_on_a10_220_prohibited": true,
+    "allowed_runpod_pod_id": "bk223asss2nj7a",
+    "create_or_resume_other_paid_pod_without_owner_authorization": false
+  },
+  "resources": [
+    {
+      "resource_id": "local-a10",
+      "kind": "local_gpu",
+      "owner": "FactionWar session",
+      "ired_state": "released_and_prohibited",
+      "last_audited_utc": "2026-08-11T15:21:42Z",
+      "ired_processes": 0,
+      "observed_gpu_work": "FactionWar process PID 596259; 1596 MiB",
+      "queued_next_experiment": null,
+      "retain_or_terminate_rationale": "Do not schedule IRED work. The owner assigned this GPU to FactionWar."
+    },
+    {
+      "resource_id": "a10-220",
+      "kind": "remote_gpu",
+      "owner": "FactionWar session",
+      "ired_state": "released_and_prohibited",
+      "last_audited_utc": "2026-08-11T15:21:42Z",
+      "ired_processes": 0,
+      "queued_next_experiment": null,
+      "retain_or_terminate_rationale": "Do not schedule IRED work even when idle. The owner assigned this GPU to FactionWar."
+    },
+    {
+      "resource_id": "bk223asss2nj7a",
+      "kind": "runpod_gpu",
+      "name": "tc4d2gate-20260808-s1-a40",
+      "historical_hardware": "1x A40, 9 allocated vCPUs",
+      "historical_hourly_cost_usd": 0.44,
+      "state": "terminated_unavailable",
+      "last_audited_utc": "2026-08-11T15:22:53Z",
+      "account_api_result": "Absent from get_pods; direct get_pod returned no pod",
+      "active_hourly_cost_usd": 0.0,
+      "queued_next_experiment": "Run full 2048-board RRN-valid evaluations for EC-C0-50600 and EC-T2-50600 from source commit b9423ed, then select the consolidation arm using the declared standard/RRN gates.",
+      "handoff_condition": "Owner restores bk223asss2nj7a or explicitly authorizes a replacement RunPod.",
+      "retain_or_terminate_rationale": "No action is possible: this pod was terminated on 2026-08-08 and is absent from the current account inventory. Wait rather than use either A10 or create another paid pod."
+    }
+  ],
+  "interrupted_work": {
+    "signal": "SIGTERM issued by the FactionWar session to the two retry evaluators after resource-ownership correction",
+    "artifact_root": "/home/ubuntu/ired-sudoku-data/expand-contract-b9423ed",
+    "ec_c0": {
+      "checkpoint_step": 50600,
+      "checkpoint_sha256": "9790edc0b17fd9213add619ca0dd5773557873c4e00d22da658bbbefaf260135",
+      "standard_exact": "925/1000",
+      "standard_unknown_cell_accuracy": 0.993438648223877,
+      "rrn_valid_original_partial_boards": 1088,
+      "rrn_valid_original_partial_sha256": "63df98f64e8dfec129dd757abde0da7aaf3ffead77681752ca684634dab005d6",
+      "rrn_valid_retry_partial_boards": 182,
+      "rrn_valid_retry_partial_sha256": "555bc6948d9f294facdf9a30487031ab8b622c3a34f5d06b1edc6197e6678518"
+    },
+    "ec_t2": {
+      "checkpoint_step": 50600,
+      "checkpoint_sha256": "7b9a1dec34aefa398a8bc969376443515728ee6eba24bc58513f672f0f770f5e",
+      "standard_exact": "922/1000",
+      "standard_unknown_cell_accuracy": 0.9935210762023926,
+      "rrn_valid_original_partial_boards": 704,
+      "rrn_valid_original_partial_sha256": "fffdb6a9e9b434019287f503a465157b7b680c0afd138b8c64077fb592b44e49",
+      "rrn_valid_retry_partial_boards": 507,
+      "rrn_valid_retry_partial_sha256": "6d05c8d70e72cbeaa13360ee944516971e4e367d755af06996f2b6e2afbc623a",
+      "remote_sync": {
+        "verified_utc": "2026-08-11T15:24:11Z",
+        "regular_files": 12,
+        "bytes": 1472153996,
+        "remote_and_local_sha256_sets_match": true
+      }
+    }
+  }
+}
