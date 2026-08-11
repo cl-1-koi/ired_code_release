@@ -97,11 +97,15 @@ class StatefulPermutationBatcher:
 
 
 class MixedSudokuTrainingDataset:
-    """Balanced finite bridge from SATNet-easy to the RRN clue distribution."""
+    """Finite configurable bridge from SATNet-easy to the RRN clue distribution."""
 
-    def __init__(self):
+    def __init__(self, rrn_count: int = 9000):
         standard = SudokuDataset("sudoku", split="train")
-        rrn = SudokuRRNDataset("sudoku-rrn", split="train", limit=len(standard))
+        if not 0 < rrn_count <= len(standard):
+            raise ValueError("mixed RRN count must be in 1..len(SATNet train)")
+        rrn = SudokuRRNDataset("sudoku-rrn", split="train", limit=rrn_count)
+        self.standard_count = len(standard)
+        self.rrn_count = len(rrn)
         self.features = torch.cat((standard.features, rrn.features), dim=0)
         self.labels = torch.cat((standard.labels, rrn.labels), dim=0)
         self.cond_entry = (
@@ -122,11 +126,11 @@ class MixedSudokuTrainingDataset:
         )
 
 
-def load_training_dataset(name: str):
+def load_training_dataset(name: str, mixed_rrn_count: int = 9000):
     if name == "satnet-train":
         return SudokuDataset("sudoku", split="train")
     if name == "mixed-satnet-rrn9k":
-        return MixedSudokuTrainingDataset()
+        return MixedSudokuTrainingDataset(rrn_count=mixed_rrn_count)
     raise ValueError(f"unknown training dataset: {name}")
 
 
@@ -159,7 +163,7 @@ def build_model(
     return diffusion
 
 
-def dataset_hashes(data_root: Path, training_dataset: str) -> dict:
+def dataset_hashes(data_root: Path, training_dataset: str, mixed_rrn_count: int) -> dict:
     values = {}
     for relative, expected in EXPECTED_DATA.items():
         path = data_root / relative
@@ -176,8 +180,8 @@ def dataset_hashes(data_root: Path, training_dataset: str) -> dict:
         values[relative] = {
             "bytes": path.stat().st_size,
             "sha256": actual,
-            "rows_used": 9000,
-            "row_selection": "first_9000",
+            "rows_used": mixed_rrn_count,
+            "row_selection": f"first_{mixed_rrn_count}",
         }
     return values
 
@@ -200,6 +204,7 @@ def source_hashes(repo: Path) -> dict:
         "IRED_SUDOKU_SEARCH_NEGATIVE_SPEC_20260811.md",
         "IRED_SUDOKU_DATA_COVERAGE_SPEC_20260811.md",
         "IRED_SUDOKU_EXPAND_CONTRACT_SPEC_20260811.md",
+        "IRED_SUDOKU_REANNEAL_SPEC_20260811.md",
     ]
     return {name: sha256_file(repo / name) for name in names if (repo / name).is_file()}
 
@@ -221,9 +226,15 @@ def make_manifest(args, dataset, model, repo: Path, data_root: Path) -> dict:
                   "sha256": PAPER_SHA256, "declared_sudoku_steps": 50000},
         "data": {"root": str(data_root),
                  "training_variant": args.training_dataset,
-                 "files": dataset_hashes(data_root, args.training_dataset),
+                 "files": dataset_hashes(
+                     data_root, args.training_dataset, args.mixed_rrn_count
+                 ),
                  "train_examples": len(dataset), "standard_validation_examples": 1000,
-                 "hard_test_examples": 18000},
+                 "hard_test_examples": 18000,
+                 "mixed_rrn_count": (
+                     args.mixed_rrn_count
+                     if args.training_dataset == "mixed-satnet-rrn9k" else 0
+                 )},
         "model": {
             "name": "released SudokuEBM CNN",
             "parameters": sum(parameter.numel() for parameter in model.parameters()),
@@ -249,6 +260,7 @@ def make_manifest(args, dataset, model, repo: Path, data_root: Path) -> dict:
             "target_steps": args.target_steps, "precision": "float32",
             "stateful_shuffled_epoch_batches": True,
             "reset_batcher_on_lineage_start": args.reset_batcher_on_lineage_start,
+            "reset_optimizer_on_lineage_start": args.reset_optimizer_on_lineage_start,
             "batcher_initial_seed": args.seed + 1,
         },
         "execution": {
@@ -278,10 +290,19 @@ def verify_manifest(manifest: dict, args) -> str:
         raise RuntimeError("training contract changed")
     if manifest.get("data", {}).get("training_variant", "satnet-train") != args.training_dataset:
         raise RuntimeError("training dataset changed")
+    expected_rrn_count = (
+        args.mixed_rrn_count if args.training_dataset == "mixed-satnet-rrn9k" else 0
+    )
+    if int(manifest.get("data", {}).get("mixed_rrn_count", 0)) != expected_rrn_count:
+        raise RuntimeError("mixed RRN count changed")
     if bool(training.get("reset_batcher_on_lineage_start", False)) != (
         args.reset_batcher_on_lineage_start
     ):
         raise RuntimeError("batcher reset contract changed")
+    if bool(training.get("reset_optimizer_on_lineage_start", False)) != (
+        args.reset_optimizer_on_lineage_start
+    ):
+        raise RuntimeError("optimizer reset contract changed")
     manifest_negative_steps = int(
         manifest.get("model", {}).get("contrastive_negative_opt_steps", 0)
     )
@@ -335,6 +356,7 @@ def make_extension_manifest(
         "parent_batcher_examples": int(parent_checkpoint["batcher"]["n"]),
         "child_batcher_examples": len(dataset),
         "batcher_reset_on_lineage_start": args.reset_batcher_on_lineage_start,
+        "optimizer_reset_on_lineage_start": args.reset_optimizer_on_lineage_start,
     }
     content["execution"]["planned_handoff"] = (
         "evaluate standard and hard sets over inference steps "
@@ -387,6 +409,17 @@ def make_extension_manifest(
     return {**content, "seal": {"sha256": sha256_json(content)}}
 
 
+def restore_optimizer_state(
+    optimizer, payload: dict, *, new_lineage: bool,
+    reset_optimizer_on_lineage_start: bool,
+) -> bool:
+    """Restore Adam state unless this invocation starts a declared reset lineage."""
+    if new_lineage and reset_optimizer_on_lineage_start:
+        return False
+    optimizer.load_state_dict(payload["optimizer"])
+    return True
+
+
 def save_checkpoint(path: Path, *, step: int, model, optimizer, ema, batcher,
                     manifest_sha256: str) -> None:
     payload = {
@@ -418,7 +451,9 @@ def main() -> None:
         choices=("satnet-train", "mixed-satnet-rrn9k"),
         default="satnet-train",
     )
+    parser.add_argument("--mixed-rrn-count", type=int, default=9000)
     parser.add_argument("--reset-batcher-on-lineage-start", action="store_true")
+    parser.add_argument("--reset-optimizer-on-lineage-start", action="store_true")
     parser.add_argument("--resume", default=None)
     parser.add_argument(
         "--parent-manifest", default=None,
@@ -430,6 +465,13 @@ def main() -> None:
         raise SystemExit("stop-after-step must be in 1..target-steps")
     if args.sudoku_negative_opt_steps < 0:
         raise SystemExit("sudoku-negative-opt-steps must be non-negative")
+    if args.training_dataset == "mixed-satnet-rrn9k":
+        if not 0 < args.mixed_rrn_count <= 9000:
+            raise SystemExit("mixed-rrn-count must be in 1..9000")
+    elif args.mixed_rrn_count != 9000:
+        raise SystemExit("mixed-rrn-count is only meaningful for mixed-satnet-rrn9k")
+    if args.reset_optimizer_on_lineage_start and not args.resume:
+        raise SystemExit("optimizer reset requires a resumed lineage")
     if not torch.cuda.is_available():
         raise SystemExit("CUDA is required")
 
@@ -441,7 +483,7 @@ def main() -> None:
     if repo in output.parents or output == repo:
         raise SystemExit("output directory must be outside the source tree")
     data_root = Path(os.environ.get("IRED_DATA_ROOT", repo / "data")).resolve()
-    dataset = load_training_dataset(args.training_dataset)
+    dataset = load_training_dataset(args.training_dataset, args.mixed_rrn_count)
     device = torch.device("cuda", 0)
     model = build_model(
         dataset.inp_dim, dataset.out_dim,
@@ -478,7 +520,11 @@ def main() -> None:
             )
         if payload["manifest_sha256"] != expected_manifest_seal:
             raise RuntimeError("checkpoint manifest mismatch")
-        model.load_state_dict(payload["model"]); optimizer.load_state_dict(payload["optimizer"])
+        model.load_state_dict(payload["model"])
+        restore_optimizer_state(
+            optimizer, payload, new_lineage=new_lineage,
+            reset_optimizer_on_lineage_start=args.reset_optimizer_on_lineage_start,
+        )
         ema.load_state_dict(payload["ema"])
         if not (new_lineage and args.reset_batcher_on_lineage_start):
             batcher.load_state_dict(payload["batcher"])

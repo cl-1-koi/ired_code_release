@@ -1,6 +1,14 @@
 import pytest
+import torch
 
-from repro.train_sudoku import build_model, sha256_json, verify_manifest_seal
+import repro.train_sudoku as train_sudoku
+from repro.train_sudoku import (
+    MixedSudokuTrainingDataset,
+    build_model,
+    restore_optimizer_state,
+    sha256_json,
+    verify_manifest_seal,
+)
 
 
 def sealed(value):
@@ -39,3 +47,53 @@ def test_sudoku_search_state_negative_refinement_is_explicit_and_opt_in():
     assert refined.sudoku_negative_opt_steps == 2
     with pytest.raises(ValueError, match="non-negative integer"):
         build_model(729, 729, sudoku_negative_opt_steps=-1)
+
+
+class _TinyDataset:
+    def __init__(self, count):
+        self.features = torch.zeros(count, 9, 9, 9)
+        self.labels = torch.zeros(count, 9, 9, 9)
+
+    def __len__(self):
+        return len(self.features)
+
+
+def test_mixed_dataset_exposes_declared_rrn_fraction(monkeypatch):
+    monkeypatch.setattr(
+        train_sudoku, "SudokuDataset", lambda *_args, **_kwargs: _TinyDataset(9)
+    )
+    monkeypatch.setattr(
+        train_sudoku, "SudokuRRNDataset",
+        lambda *_args, **kwargs: _TinyDataset(kwargs["limit"]),
+    )
+    dataset = MixedSudokuTrainingDataset(rrn_count=3)
+    assert dataset.standard_count == 9
+    assert dataset.rrn_count == 3
+    assert len(dataset) == 12
+    with pytest.raises(ValueError, match="mixed RRN count"):
+        MixedSudokuTrainingDataset(rrn_count=10)
+
+
+def test_optimizer_reset_is_only_applied_at_new_lineage_boundary():
+    class RecordingOptimizer:
+        def __init__(self):
+            self.loaded = None
+
+        def load_state_dict(self, state):
+            self.loaded = state
+
+    payload = {"optimizer": {"state": "parent"}}
+    optimizer = RecordingOptimizer()
+    restored = restore_optimizer_state(
+        optimizer, payload, new_lineage=True,
+        reset_optimizer_on_lineage_start=True,
+    )
+    assert not restored
+    assert optimizer.loaded is None
+
+    restored = restore_optimizer_state(
+        optimizer, payload, new_lineage=False,
+        reset_optimizer_on_lineage_start=True,
+    )
+    assert restored
+    assert optimizer.loaded == payload["optimizer"]
