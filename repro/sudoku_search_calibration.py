@@ -21,7 +21,7 @@ from repro.sudoku_energy_calibration import (
     load_dataset,
     load_weight_source,
 )
-from repro.sudoku_metrics import sudoku_batch_metrics
+from repro.sudoku_metrics import decode_digits, sudoku_batch_metrics
 from repro.train_sudoku import sha256_file, verify_manifest_seal
 
 
@@ -186,6 +186,9 @@ def evaluate_search(
         stacked_predictions = torch.stack(predictions)
         stacked_energies = torch.stack(energies)
         stacked_solved = torch.stack(per_restart_solved).to(device)
+        stacked_digits = torch.stack([
+            decode_digits(prediction) for prediction in stacked_predictions
+        ])
         for prefix in (1, 2, 4, 8, 16):
             if prefix > restarts:
                 continue
@@ -197,6 +200,14 @@ def evaluate_search(
             selected_conflicts = exact_conflict_energy(selected_metrics.predicted_digits).to(device)
             blank_count = (~mask.reshape(-1, 9, 9, 9)[..., 0].bool()).sum(dim=(1, 2))
             selected_errors = (1 - selected_metrics.unknown_cell_accuracy.to(device)) * blank_count
+            hamming_from_first = (
+                stacked_digits[:prefix] != stacked_digits[0:1]
+            ).sum(dim=(2, 3))
+            diverse = (hamming_from_first > 0).any(dim=0)
+            unique_counts = []
+            for board in range(len(inp)):
+                flattened = stacked_digits[:prefix, board].reshape(prefix, -1)
+                unique_counts.append(len(torch.unique(flattened, dim=0)))
             restart_metrics[prefix].add(
                 first_solved=stacked_solved[0],
                 any_solved=stacked_solved[:prefix].any(dim=0),
@@ -204,6 +215,9 @@ def evaluate_search(
                 selected_unknown_accuracy=selected_metrics.unknown_cell_accuracy,
                 selected_conflict_energy=selected_conflicts,
                 selected_unknown_errors=selected_errors,
+                restart_diverse=diverse,
+                unique_decoded_boards=torch.tensor(unique_counts, device=device),
+                hamming_from_first=hamming_from_first.float().mean(dim=0),
             )
             all_metrics = [
                 sudoku_batch_metrics(candidate, label, mask)
@@ -253,6 +267,9 @@ def evaluate_search(
             "minimum_energy_unknown_accuracy": values.mean("selected_unknown_accuracy"),
             "minimum_energy_exact_conflict_mean": values.mean("selected_conflict_energy"),
             "minimum_energy_unknown_errors_mean": values.mean("selected_unknown_errors"),
+            "fraction_boards_with_restart_diversity": values.mean("restart_diverse"),
+            "mean_unique_decoded_boards": values.mean("unique_decoded_boards"),
+            "mean_hamming_cells_from_first_restart": values.mean("hamming_from_first"),
             "spearman_energy_vs_exact_conflict": spearman(energy, conflicts),
             "spearman_energy_vs_unknown_errors": spearman(energy, errors),
         })
